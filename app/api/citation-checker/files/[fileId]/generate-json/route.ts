@@ -60,14 +60,19 @@ export async function POST(
     }
 
     // TODO: Implement actual JSON generation from file using parser
-    // Parser will define the JSON structure - for now, placeholder
-    const jsonData = {
+    // Parser will populate content array and citations array
+    // For now, create structure matching citationjson.md specification
+    const jsonData: any = {
       document: {
-        filename: fileUpload.originalName,
-        uploadedAt: fileUpload.createdAt.toISOString(),
+        metadata: {
+          filename: fileUpload.originalName,
+          uploadDate: fileUpload.createdAt.toISOString(),
+          documentType: null, // Will be detected by parser
+          totalCitations: 0, // Will be populated by parser
+        },
+        content: [], // Parser will extract paragraphs/sections with inline citations
+        citations: [], // Parser will extract and populate citations array
       },
-      // Parser will populate: citations, validation results, etc.
-      generatedAt: new Date().toISOString(),
     }
 
     // Update citation check with JSON (stored as JsonB)
