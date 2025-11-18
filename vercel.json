@@ -1,5 +1,5 @@
 {
-  "buildCommand": "PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 prisma generate && next build",
+  "buildCommand": "PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1 PRISMA_ENGINES_MIRROR=https://binaries.prisma.sh prisma generate && next build",
   "framework": "nextjs",
   "installCommand": "npm install"
 }
