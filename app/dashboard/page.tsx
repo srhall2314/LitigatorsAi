@@ -66,12 +66,32 @@ export default async function DashboardPage() {
 
             <div className="border border-gray-200 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-black mb-2">
+                Citation Checker Workflow
+              </h2>
+              <p className="text-black mb-4">
+                Verify and validate citations in your documents
+              </p>
+              <a
+                href="/citation-checker"
+                className="text-black underline hover:no-underline inline-block"
+              >
+                Open Citation Checker →
+              </a>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-black mb-2">
                 Quick Actions
               </h2>
               <ul className="space-y-2 text-black">
                 <li>
                   <a href="/" className="underline hover:no-underline">
                     Home
+                  </a>
+                </li>
+                <li>
+                  <a href="/citation-checker" className="underline hover:no-underline">
+                    Citation Checker
                   </a>
                 </li>
                 {user.role === "admin" && (
