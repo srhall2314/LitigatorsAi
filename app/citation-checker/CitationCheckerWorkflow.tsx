@@ -121,6 +121,7 @@ export function CitationCheckerWorkflow() {
       component: (
         <IdentifyCitationsStep 
           onComplete={() => handleStepComplete("identify-citations")}
+          fileId={selectedFileId}
           checkId={selectedCheckId}
         />
       ),
@@ -132,6 +133,7 @@ export function CitationCheckerWorkflow() {
       component: (
         <ValidateCitationsStep 
           onComplete={() => handleStepComplete("validate-citations")}
+          fileId={selectedFileId}
           checkId={selectedCheckId}
         />
       ),
@@ -143,6 +145,7 @@ export function CitationCheckerWorkflow() {
       component: (
         <ReviewDiscrepanciesStep 
           onComplete={() => handleStepComplete("review-discrepancies")}
+          fileId={selectedFileId}
           checkId={selectedCheckId}
         />
       ),
@@ -151,7 +154,7 @@ export function CitationCheckerWorkflow() {
       id: "citations-report",
       title: "Citations Report",
       description: "View the final citation validation report",
-      component: <CitationsReportStep checkId={selectedCheckId} />,
+      component: <CitationsReportStep fileId={selectedFileId} checkId={selectedCheckId} />,
     },
   ]
 
@@ -231,6 +234,123 @@ export function CitationCheckerWorkflow() {
         <div className="mt-8">{currentStepData.component}</div>
       </div>
     </>
+  )
+}
+
+// Context Panel Component
+function ContextPanel({ 
+  fileId, 
+  checkId,
+  showJson = false,
+  showCitationCount = false,
+  showValidationResults = false
+}: { 
+  fileId: string | null
+  checkId: string | null
+  showJson?: boolean
+  showCitationCount?: boolean
+  showValidationResults?: boolean
+}) {
+  const [fileInfo, setFileInfo] = useState<{ filename: string } | null>(null)
+  const [jsonData, setJsonData] = useState<string | null>(null)
+  const [citationCount, setCitationCount] = useState<number | null>(null)
+  const [validationResults, setValidationResults] = useState<{ valid: number; invalid: number } | null>(null)
+
+  useEffect(() => {
+    if (checkId) {
+      loadContextData()
+    }
+  }, [checkId])
+
+  const loadContextData = async () => {
+    if (!checkId) return
+    
+    try {
+      // Load check data
+      const checkRes = await fetch(`/api/citation-checker/checks/${checkId}`)
+      if (checkRes.ok) {
+        const checkData = await checkRes.json()
+        
+        // Get file info
+        if (checkData.fileUpload) {
+          setFileInfo({ filename: checkData.fileUpload.originalName })
+        }
+        
+        // Get JSON data
+        if (checkData.jsonData) {
+          setJsonData(JSON.stringify(checkData.jsonData, null, 2))
+          
+          // Extract citation count from JSON
+          if (checkData.jsonData.document?.citations) {
+            setCitationCount(checkData.jsonData.document.citations.length)
+          } else if (checkData.jsonData.document?.metadata?.totalCitations) {
+            setCitationCount(checkData.jsonData.document.metadata.totalCitations)
+          }
+        }
+        
+        // Extract validation results from JSON if available
+        if (checkData.jsonData?.document?.citations) {
+          const citations = checkData.jsonData.document.citations
+          const valid = citations.filter((c: any) => 
+            c.tier_2?.consensus === "VALID"
+          ).length
+          const invalid = citations.length - valid
+          setValidationResults({ valid, invalid })
+        }
+      }
+    } catch (error) {
+      console.error("Error loading context data:", error)
+    }
+  }
+
+  if (!fileInfo && !jsonData && !citationCount) {
+    return null
+  }
+
+  return (
+    <div className="mt-6 border-t border-gray-200 pt-6">
+      <h3 className="text-sm font-semibold text-gray-700 mb-4">Context & Debug Info</h3>
+      <div className="space-y-4">
+        {fileInfo && (
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-1">File Name</div>
+            <div className="text-sm text-black">{fileInfo.filename}</div>
+          </div>
+        )}
+        
+        {showCitationCount && citationCount !== null && (
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-1">Total Citations</div>
+            <div className="text-sm font-semibold text-black">{citationCount}</div>
+          </div>
+        )}
+        
+        {showValidationResults && validationResults && (
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Validation Results</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-gray-600">Valid</div>
+                <div className="text-lg font-bold text-green-600">{validationResults.valid}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-600">Invalid/Flagged</div>
+                <div className="text-lg font-bold text-red-600">{validationResults.invalid}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {showJson && jsonData && (
+          <div>
+            <div className="text-xs font-medium text-gray-500 mb-2">Current JSON</div>
+            <div className="p-3 bg-gray-50 rounded-md border border-gray-200">
+              <pre className="text-xs text-black overflow-auto max-h-64">{jsonData}</pre>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -483,9 +603,11 @@ function GenerateJsonStep({
 
 function IdentifyCitationsStep({ 
   onComplete, 
+  fileId,
   checkId 
 }: { 
   onComplete: () => void
+  fileId: string | null
   checkId: string | null
 }) {
   const [identifying, setIdentifying] = useState(false)
@@ -526,15 +648,23 @@ function IdentifyCitationsStep({
           </ul>
         </div>
       )}
+      
+      <ContextPanel 
+        fileId={fileId}
+        checkId={checkId}
+        showJson={true}
+      />
     </div>
   )
 }
 
 function ValidateCitationsStep({ 
   onComplete, 
+  fileId,
   checkId 
 }: { 
   onComplete: () => void
+  fileId: string | null
   checkId: string | null
 }) {
   const [validating, setValidating] = useState(false)
@@ -574,15 +704,24 @@ function ValidateCitationsStep({
           </div>
         </div>
       )}
+      
+      <ContextPanel 
+        fileId={fileId}
+        checkId={checkId}
+        showJson={true}
+        showCitationCount={true}
+      />
     </div>
   )
 }
 
 function ReviewDiscrepanciesStep({ 
   onComplete, 
+  fileId,
   checkId 
 }: { 
   onComplete: () => void
+  fileId: string | null
   checkId: string | null
 }) {
   const [discrepancies] = useState([
@@ -633,11 +772,19 @@ function ReviewDiscrepanciesStep({
       >
         Continue to Report
       </button>
+      
+      <ContextPanel 
+        fileId={fileId}
+        checkId={checkId}
+        showJson={true}
+        showCitationCount={true}
+        showValidationResults={true}
+      />
     </div>
   )
 }
 
-function CitationsReportStep({ checkId }: { checkId: string | null }) {
+function CitationsReportStep({ fileId, checkId }: { fileId: string | null; checkId: string | null }) {
   return (
     <div className="space-y-6">
       <div className="p-6 bg-gray-50 rounded-md">
@@ -677,6 +824,14 @@ function CitationsReportStep({ checkId }: { checkId: string | null }) {
           Start New Check
         </button>
       </div>
+      
+      <ContextPanel 
+        fileId={fileId}
+        checkId={checkId}
+        showJson={true}
+        showCitationCount={true}
+        showValidationResults={true}
+      />
     </div>
   )
 }
