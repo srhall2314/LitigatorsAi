@@ -85,10 +85,17 @@ export function CitationCheckerWorkflow() {
             setSelectedFileId(fileId)
             setSelectedCheckId(checkId)
             const file = files.find(f => f.id === fileId)
-            if (file && file.citationChecks[0]?.jsonData) {
-              // JSON already exists, jump to generate-json step
-              setCurrentStep("generate-json")
-              setCompletedSteps(new Set(["upload"]))
+            if (file) {
+              const hasJson = file.citationChecks[0]?.jsonData
+              if (hasJson) {
+                // JSON already exists, jump to generate-json step
+                setCurrentStep("generate-json")
+                setCompletedSteps(new Set(["upload"]))
+              } else {
+                // No JSON yet, navigate to generate-json step to create it
+                setCurrentStep("generate-json")
+                setCompletedSteps(new Set(["upload"]))
+              }
             }
           }}
           onRefresh={loadFiles}
@@ -355,8 +362,12 @@ function UploadStep({
                         </button>
                       ) : (
                         <button
-                          onClick={() => onFileSelect(file.id, latestCheck?.id || "")}
-                          className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
+                          onClick={() => {
+                            const checkId = latestCheck?.id || ""
+                            onFileSelect(file.id, checkId)
+                          }}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={!latestCheck}
                         >
                           Select & Generate JSON
                         </button>
