@@ -39,6 +39,15 @@ export default async function AdminPage() {
             <p className="text-black mt-2">Manage users and accounts</p>
           </div>
 
+          <div className="mb-4 flex justify-end">
+            <Link
+              href="/admin/users/new"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            >
+              + Create New User
+            </Link>
+          </div>
+
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-xl font-semibold text-black">Users ({users.length})</h2>

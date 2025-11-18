@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import bcrypt from "bcryptjs"
 
 export async function PATCH(
   request: NextRequest,
@@ -23,7 +24,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { name, role } = body
+    const { name, role, password } = body
 
     if (role && !["user", "admin"].includes(role)) {
       return NextResponse.json(
@@ -32,12 +33,17 @@ export async function PATCH(
       )
     }
 
+    const updateData: any = {}
+    if (name !== undefined) updateData.name = name
+    if (role !== undefined) updateData.role = role
+    if (password !== undefined && password !== "") {
+      // Hash the password if provided
+      updateData.password = await bcrypt.hash(password, 10)
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: params.id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(role !== undefined && { role }),
-      },
+      data: updateData,
     })
 
     return NextResponse.json(updatedUser)

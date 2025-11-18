@@ -15,6 +15,7 @@ export function UserEditForm({ user }: { user: User }) {
   const router = useRouter()
   const [name, setName] = useState(user.name || "")
   const [role, setRole] = useState(user.role)
+  const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
 
@@ -29,7 +30,7 @@ export function UserEditForm({ user }: { user: User }) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name, role }),
+        body: JSON.stringify({ name, role, password }),
       })
 
       if (!res.ok) {
@@ -37,6 +38,7 @@ export function UserEditForm({ user }: { user: User }) {
       }
 
       setMessage({ type: "success", text: "User updated successfully" })
+      setPassword("") // Clear password field
       router.refresh()
     } catch (error) {
       setMessage({ type: "error", text: "Failed to update user" })
@@ -96,6 +98,25 @@ export function UserEditForm({ user }: { user: User }) {
           <option value="user">User</option>
           <option value="admin">Admin</option>
         </select>
+      </div>
+
+      <div>
+        <label
+          htmlFor="password"
+          className="block text-sm font-medium text-gray-700"
+        >
+          New Password
+        </label>
+        <input
+          type="password"
+          id="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          placeholder="Leave blank to keep current password"
+          minLength={6}
+        />
+        <p className="mt-1 text-sm text-gray-500">Leave blank to keep current password. Minimum 6 characters if changing.</p>
       </div>
 
       {message && (
