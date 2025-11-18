@@ -10,14 +10,17 @@ export interface BlobUploadOptions {
 
 export async function uploadBlob(
   filename: string,
-  body: string | Blob | ArrayBuffer | FormData | ReadableStream,
+  body: string | Blob | ArrayBuffer | ReadableStream<Uint8Array>,
   options?: BlobUploadOptions
 ) {
   if (!BLOB_READ_WRITE_TOKEN) {
     throw new Error('BLOB_READ_WRITE_TOKEN is not configured');
   }
 
-  return await put(filename, body, {
+  // Convert FormData to ArrayBuffer if needed (handled by caller)
+  const bodyToUpload: string | Blob | ArrayBuffer | ReadableStream<Uint8Array> = body;
+
+  return await put(filename, bodyToUpload, {
     access: options?.access || 'public',
     token: BLOB_READ_WRITE_TOKEN,
     addRandomSuffix: options?.addRandomSuffix ?? true,
