@@ -41,8 +41,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(files)
   } catch (error) {
     console.error("Error fetching files:", error)
+    // Log full error for debugging
+    if (error instanceof Error) {
+      console.error("Error details:", error.message, error.stack)
+    }
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Internal server error", details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     )
   }
@@ -102,14 +106,30 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    // Serialize Date objects for JSON response
     return NextResponse.json({
-      fileUpload,
-      citationCheck,
+      fileUpload: {
+        ...fileUpload,
+        createdAt: fileUpload.createdAt.toISOString(),
+        updatedAt: fileUpload.updatedAt.toISOString(),
+      },
+      citationCheck: {
+        ...citationCheck,
+        createdAt: citationCheck.createdAt.toISOString(),
+        updatedAt: citationCheck.updatedAt.toISOString(),
+      },
     })
   } catch (error) {
     console.error("Error uploading file:", error)
+    // Log full error for debugging
+    if (error instanceof Error) {
+      console.error("Upload error details:", error.message, error.stack)
+    }
     return NextResponse.json(
-      { error: "Failed to upload file" },
+      { 
+        error: "Failed to upload file",
+        details: error instanceof Error ? error.message : String(error)
+      },
       { status: 500 }
     )
   }
