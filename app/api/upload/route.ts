@@ -16,7 +16,6 @@ export async function POST(request: NextRequest) {
     const buffer = await file.arrayBuffer();
     const blob = await uploadBlob(file.name, buffer, {
       contentType: file.type,
-      access: 'public',
     });
 
     return NextResponse.json({

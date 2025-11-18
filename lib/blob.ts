@@ -2,7 +2,6 @@ import { put, list, head, del } from '@vercel/blob';
 import { BLOB_READ_WRITE_TOKEN } from '@/lib/env';
 
 export interface BlobUploadOptions {
-  access?: 'public' | 'private';
   addRandomSuffix?: boolean;
   cacheControlMaxAge?: number;
   contentType?: string;
@@ -20,8 +19,11 @@ export async function uploadBlob(
   // Convert FormData to ArrayBuffer if needed (handled by caller)
   const bodyToUpload: string | Blob | ArrayBuffer | ReadableStream<Uint8Array> = body;
 
+  // Ensure access is always 'public' as that's the only supported value
+  const access: 'public' = 'public';
+
   return await put(filename, bodyToUpload, {
-    access: options?.access || 'public',
+    access,
     token: BLOB_READ_WRITE_TOKEN,
     addRandomSuffix: options?.addRandomSuffix ?? true,
     cacheControlMaxAge: options?.cacheControlMaxAge,
