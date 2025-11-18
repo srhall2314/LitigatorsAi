@@ -76,7 +76,22 @@ Example API endpoint: `/api/upload`
 ## Deployment
 
 This project is configured for Vercel deployment. Make sure to:
-1. Add environment variables in Vercel dashboard
-2. Run `npm run db:push` or migrations after deployment
-3. Ensure `BLOB_READ_WRITE_TOKEN` is set in Vercel
+
+1. **Add environment variables in Vercel dashboard:**
+   - `DATABASE_URL` - Your Neon database connection string
+   - `NEXTAUTH_SECRET` - Your NextAuth secret
+   - `NEXTAUTH_URL` - Your production URL (e.g., https://your-app.vercel.app)
+   - `BLOB_READ_WRITE_TOKEN` - Your Vercel Blob Storage token
+   - `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1` - Set to "1" to avoid Prisma checksum errors during build
+
+2. **Run database migrations:**
+   ```bash
+   npm run db:push
+   ```
+   Or use Prisma migrations for production.
+
+3. **Build process:**
+   - The `postinstall` script automatically runs `prisma generate` after npm install
+   - The `build` script runs `prisma generate && next build`
+   - Vercel build command includes the checksum ignore flag
 
