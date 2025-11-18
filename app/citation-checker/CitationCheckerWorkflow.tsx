@@ -49,6 +49,11 @@ export function CitationCheckerWorkflow() {
   const [files, setFiles] = useState<FileUpload[]>([])
   const [loadingFiles, setLoadingFiles] = useState(true)
 
+  // Update selectedCheckId when it changes (e.g., after citation identification creates new version)
+  const updateSelectedCheckId = (newCheckId: string) => {
+    setSelectedCheckId(newCheckId)
+  }
+
   useEffect(() => {
     loadFiles()
   }, [])
@@ -123,6 +128,7 @@ export function CitationCheckerWorkflow() {
           onComplete={() => handleStepComplete("identify-citations")}
           fileId={selectedFileId}
           checkId={selectedCheckId}
+          onCheckIdUpdate={updateSelectedCheckId}
         />
       ),
     },
@@ -604,37 +610,78 @@ function GenerateJsonStep({
 function IdentifyCitationsStep({ 
   onComplete, 
   fileId,
-  checkId 
+  checkId,
+  onCheckIdUpdate
 }: { 
   onComplete: () => void
   fileId: string | null
   checkId: string | null
+  onCheckIdUpdate?: (newCheckId: string) => void
 }) {
   const [identifying, setIdentifying] = useState(false)
   const [citations, setCitations] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [currentCheckId, setCurrentCheckId] = useState<string | null>(checkId)
 
   const handleIdentify = async () => {
+    if (!checkId) {
+      setError("No citation check selected")
+      return
+    }
+
     setIdentifying(true)
-    // TODO: Implement citation identification API
-    setTimeout(() => {
-      setCitations([
-        "Smith v. Jones, 123 F.3d 456 (2020)",
-        "Doe v. Roe, 456 U.S. 789 (2019)",
-      ])
+    setError(null)
+    
+    try {
+      const res = await fetch(`/api/citation-checker/checks/${checkId}/identify-citations`, {
+        method: "POST",
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        
+        // Update checkId to the new version
+        setCurrentCheckId(data.id)
+        if (onCheckIdUpdate) {
+          onCheckIdUpdate(data.id)
+        }
+        
+        // Extract citations from jsonData
+        if (data.jsonData?.document?.citations) {
+          const citationTexts = data.jsonData.document.citations.map(
+            (cit: any) => cit.citationText
+          )
+          setCitations(citationTexts)
+        }
+        
+        onComplete()
+      } else {
+        const errorData = await res.json()
+        setError(errorData.error || errorData.details || "Failed to identify citations")
+      }
+    } catch (err) {
+      console.error("Identify citations error:", err)
+      setError("Failed to identify citations")
+    } finally {
       setIdentifying(false)
-      onComplete()
-    }, 2000)
+    }
   }
 
   return (
     <div className="space-y-6">
       <button
         onClick={handleIdentify}
-        disabled={identifying}
+        disabled={identifying || !checkId}
         className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
       >
         {identifying ? "Identifying Citations..." : "Identify Citations"}
       </button>
+
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-red-800 text-sm">{error}</p>
+        </div>
+      )}
 
       {citations.length > 0 && (
         <div className="mt-4">
@@ -651,7 +698,7 @@ function IdentifyCitationsStep({
       
       <ContextPanel 
         fileId={fileId}
-        checkId={checkId}
+        checkId={currentCheckId || checkId}
         showJson={true}
       />
     </div>
