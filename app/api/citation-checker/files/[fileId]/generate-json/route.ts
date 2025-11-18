@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { parseWordDocument } from "@/lib/document-parser"
 
 export async function POST(
   request: NextRequest,
@@ -36,6 +37,13 @@ export async function POST(
       return NextResponse.json({ error: "File not found" }, { status: 404 })
     }
 
+    if (!fileUpload.blobUrl) {
+      return NextResponse.json(
+        { error: "File URL not found" },
+        { status: 400 }
+      )
+    }
+
     // Check if JSON already exists
     const latestCheck = fileUpload.citationChecks[0]
     const hasJson = latestCheck && latestCheck.jsonData
@@ -44,6 +52,7 @@ export async function POST(
     if (hasJson && latestCheck.status === "json_generated") {
       // Use existing check
       citationCheck = latestCheck
+      return NextResponse.json(citationCheck)
     } else {
       // Create new version or update existing
       const version = latestCheck ? latestCheck.version + 1 : 1
@@ -59,20 +68,39 @@ export async function POST(
       })
     }
 
-    // TODO: Implement actual JSON generation from file using parser
-    // Parser will populate content array and citations array
-    // For now, create structure matching citationjson.md specification
-    const jsonData: any = {
-      document: {
-        metadata: {
-          filename: fileUpload.originalName,
-          uploadDate: fileUpload.createdAt.toISOString(),
-          documentType: null, // Will be detected by parser
-          totalCitations: 0, // Will be populated by parser
+    // Download file from Vercel Blob Storage
+    let fileBuffer: ArrayBuffer
+    try {
+      const fileResponse = await fetch(fileUpload.blobUrl)
+      if (!fileResponse.ok) {
+        throw new Error(`Failed to download file: ${fileResponse.statusText}`)
+      }
+      fileBuffer = await fileResponse.arrayBuffer()
+    } catch (error) {
+      console.error("Error downloading file:", error)
+      return NextResponse.json(
+        { error: "Failed to download file from storage" },
+        { status: 500 }
+      )
+    }
+
+    // Parse Word document to JSON structure
+    let jsonData: any
+    try {
+      jsonData = await parseWordDocument(
+        fileBuffer,
+        fileUpload.originalName,
+        fileUpload.createdAt.toISOString()
+      )
+    } catch (error) {
+      console.error("Error parsing document:", error)
+      return NextResponse.json(
+        { 
+          error: "Failed to parse document",
+          details: error instanceof Error ? error.message : String(error)
         },
-        content: [], // Parser will extract paragraphs/sections with inline citations
-        citations: [], // Parser will extract and populate citations array
-      },
+        { status: 500 }
+      )
     }
 
     // Update citation check with JSON (stored as JsonB)
@@ -80,7 +108,7 @@ export async function POST(
       where: { id: citationCheck.id },
       data: {
         status: "json_generated",
-        jsonData: jsonData as any, // Type will be defined when parser is built
+        jsonData: jsonData as any,
       },
     })
 
