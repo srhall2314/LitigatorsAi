@@ -1,0 +1,312 @@
+{
+  "document": {
+    "content": [
+      {
+        "id": "heading_001",
+        "text": "MOTION TO DISMISS",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_001",
+        "text": "Plaintiff v. Defendant",
+        "type": "paragraph"
+      },
+      {
+        "id": "heading_002",
+        "text": "I. INTRODUCTION",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_002",
+        "text": "Defendant submits this Motion to Dismiss pursuant to Federal Rule of Civil Procedure 12(b)(6). The complaint fails to state a claim upon which relief can be granted. As established in Bell Atlantic Corp. v. Twombly, 550 U.S. 544 (2007), the complaint must contain sufficient factual matter to state a plausible claim for relief.",
+        "type": "paragraph"
+      },
+      {
+        "id": "heading_003",
+        "text": "II. FACTUAL BACKGROUND",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_003",
+        "text": "This action involves alleged violations of the Civil Rights Act of 1964, [CITATION:cit_002]42 U.S.C. § 2000[/CITATION:cit_002] et seq. The plaintiff alleges employment discrimination based on protected characteristics. The parties are subject to the jurisdiction of this Court pursuant to [CITATION:cit_001]28 U.S.C. § 1331[/CITATION:cit_001].",
+        "type": "paragraph"
+      },
+      {
+        "id": "para_004",
+        "text": "Under the Age Discrimination in Employment Act (ADEA), [CITATION:cit_003]29 U.S.C. § 623[/CITATION:cit_003], it is unlawful for an employer to discriminate against any individual with respect to compensation, terms, conditions, or privileges of employment based on age.",
+        "type": "paragraph"
+      },
+      {
+        "id": "heading_004",
+        "text": "III. LEGAL STANDARD",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_005",
+        "text": "A motion to dismiss under Federal Rule of Civil Procedure 12(b)(6) challenges the sufficiency of the complaint. Ashcroft v. Iqbal, 556 U.S. 662 (2009). At the pleading stage, plaintiff must plead enough facts to give the defendant fair notice of the claim. Conley v. Gibson, 355 U.S. 41 (1957), established the notice pleading standard.",
+        "type": "paragraph"
+      },
+      {
+        "id": "para_006",
+        "text": "The Federal Rules of Civil Procedure, as amended in 2015, require that allegations be made with particularity in cases involving fraud. See [CITATION:cit_004]Fed. R. Civ. P. 9(b)[/CITATION:cit_004]. Courts must also consider the guidelines in Civil Local Rule 7.1 for motion practice.",
+        "type": "paragraph"
+      },
+      {
+        "id": "heading_005",
+        "text": "IV. ARGUMENT",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "heading_006",
+        "text": "A. The Complaint Fails to State a Claim",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_007",
+        "text": "The Supreme Court's decision in Swierkiewicz v. Sorema N.A., 534 U.S. 506 (2002), established the burden-shifting framework for Title VII discrimination cases. Plaintiff must demonstrate: (1) membership in a protected class; (2) satisfactory job performance; (3) an adverse employment action; and (4) circumstances suggesting discriminatory intent.",
+        "type": "paragraph"
+      },
+      {
+        "id": "para_008",
+        "text": "[CITATION:cit_005]Here, plaintiff's allegations are conclusory and lack the necessary factual support. The complaint cites only conclusory statements without specific factual allegations. This falls short of the standard articulated in District of Columbia v. Air Florida, Inc., 750 F.2d 1077 (D.C. Cir. 1984)[/CITATION:cit_005].",
+        "type": "paragraph"
+      },
+      {
+        "id": "heading_007",
+        "text": "B. Regulations Support Defendant's Position",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_009",
+        "text": "Equal Employment Opportunity Commission (EEOC) regulations at [CITATION:cit_007]29 C.F.R. § 1601.20[/CITATION:cit_007] outline the procedural requirements for filing discrimination charges. Additionally, [CITATION:cit_006]5 U.S.C. § 2302[/CITATION:cit_006] provides protections for federal employees against discrimination.",
+        "type": "paragraph"
+      },
+      {
+        "id": "para_010",
+        "text": "The Occupational Safety and Health Administration (OSHA) standards, codified in 29 C.F.R. § 1910 et seq., establish workplace safety requirements. While not directly applicable here, these regulations demonstrate the federal framework governing employment relationships.",
+        "type": "paragraph"
+      },
+      {
+        "id": "para_011",
+        "text": "Federal regulations under the Department of Labor, specifically [CITATION:cit_008]29 C.F.R. § 503.1[/CITATION:cit_008], further establish procedural guidelines that must be followed in employment matters. See also Revised Statutes § 4700, which provides additional authority for employment law.",
+        "type": "paragraph"
+      },
+      {
+        "id": "heading_008",
+        "text": "V. RELIEF REQUESTED",
+        "type": "heading",
+        "level": 1
+      },
+      {
+        "id": "para_012",
+        "text": "For the foregoing reasons, Defendant respectfully requests that this Court grant the Motion to Dismiss and dismiss plaintiff's Complaint with prejudice pursuant to Federal Rule of Civil Procedure 12(b)(6).",
+        "type": "paragraph"
+      },
+      {
+        "id": "para_013",
+        "text": "Alternatively, if the Court determines that any claims survive this motion, Defendant reserves the right to file an Answer and conduct discovery consistent with the Federal Rules of Civil Procedure.",
+        "type": "paragraph"
+      }
+    ],
+    "metadata": {
+      "filename": "Citation_Test_Document.docx",
+      "uploadDate": "2025-11-18T19:49:59.470Z",
+      "totalCitations": 8,
+      "identificationMethod": "custom"
+    },
+    "citations": [
+      {
+        "id": "cit_001",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.98
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "28 U.S.C. § 1331",
+        "citationType": "statute",
+        "recommendations": null,
+        "extractedComponents": {
+          "code": "U.S.C.",
+          "title": "28",
+          "section": "1331",
+          "subdivision": null
+        }
+      },
+      {
+        "id": "cit_002",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.98
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "42 U.S.C. § 2000",
+        "citationType": "statute",
+        "recommendations": null,
+        "extractedComponents": {
+          "code": "U.S.C.",
+          "title": "42",
+          "section": "2000",
+          "subdivision": null
+        }
+      },
+      {
+        "id": "cit_003",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.98
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "29 U.S.C. § 623",
+        "citationType": "statute",
+        "recommendations": null,
+        "extractedComponents": {
+          "code": "U.S.C.",
+          "title": "29",
+          "section": "623",
+          "subdivision": null
+        }
+      },
+      {
+        "id": "cit_004",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.99
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "Fed. R. Civ. P. 9(b)",
+        "citationType": "rule",
+        "recommendations": null,
+        "extractedComponents": {
+          "rule": "9(b)",
+          "ruleSet": "Federal Rules of Civil Procedure",
+          "subdivision": null
+        }
+      },
+      {
+        "id": "cit_005",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.99
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "Here, plaintiff's allegations are conclusory and lack the necessary factual support. The complaint cites only conclusory statements without specific factual allegations. This falls short of the standard articulated in District of Columbia v. Air Florida, Inc., 750 F.2d 1077 (D.C. Cir. 1984)",
+        "citationType": "case",
+        "recommendations": null,
+        "extractedComponents": {
+          "page": "1077",
+          "year": 1984,
+          "court": "D.C. Cir.",
+          "parties": [
+            "Here, plaintiff's allegations are conclusory and lack the necessary factual support. The complaint cites only conclusory statements without specific factual allegations. This falls short of the standard articulated in District of Columbia",
+            "Air Florida, Inc."
+          ],
+          "reporter": "F.2d"
+        }
+      },
+      {
+        "id": "cit_006",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.98
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "5 U.S.C. § 2302",
+        "citationType": "statute",
+        "recommendations": null,
+        "extractedComponents": {
+          "code": "U.S.C.",
+          "title": "5",
+          "section": "2302",
+          "subdivision": null
+        }
+      },
+      {
+        "id": "cit_007",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.98
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "29 C.F.R. § 1601.20",
+        "citationType": "regulation",
+        "recommendations": null,
+        "extractedComponents": {
+          "code": "C.F.R.",
+          "title": "29",
+          "section": "1601.20"
+        }
+      },
+      {
+        "id": "cit_008",
+        "tier_1": {
+          "status": "VALID_FORMAT",
+          "confidence": 0.98
+        },
+        "tier_2": {
+          "consensus": "VALID",
+          "escalated": false,
+          "evaluations": [],
+          "consensusConfidence": 0
+        },
+        "tier_3": null,
+        "citationText": "29 C.F.R. § 503.1",
+        "citationType": "regulation",
+        "recommendations": null,
+        "extractedComponents": {
+          "code": "C.F.R.",
+          "title": "29",
+          "section": "503.1"
+        }
+      }
+    ]
+  }
+}

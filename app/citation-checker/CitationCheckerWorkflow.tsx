@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 
 type WorkflowStep = 
   | "upload"
@@ -524,28 +524,60 @@ function GenerateJsonStep({
 }) {
   const [generating, setGenerating] = useState(false)
   const [jsonData, setJsonData] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    if (checkId) {
-      loadCheckData()
-    }
-  }, [checkId])
-
-  const loadCheckData = async () => {
-    if (!checkId) return
+  const loadCheckData = useCallback(async () => {
+    setLoading(true)
     try {
-      const res = await fetch(`/api/citation-checker/checks/${checkId}`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data.jsonData) {
-          // jsonData is already a JSON object (JsonB from database)
-          setJsonData(JSON.stringify(data.jsonData, null, 2))
+      // First try to load from checkId if provided
+      if (checkId) {
+        console.log('[GenerateJsonStep] Loading check data for checkId:', checkId)
+        const res = await fetch(`/api/citation-checker/checks/${checkId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.jsonData) {
+            console.log('[GenerateJsonStep] Found JSON in check:', checkId)
+            setJsonData(JSON.stringify(data.jsonData, null, 2))
+            setLoading(false)
+            return
+          }
+        }
+      }
+      
+      // If no checkId or checkId doesn't have JSON, check the file's latest check
+      if (fileId) {
+        console.log('[GenerateJsonStep] Checking file for existing JSON:', fileId)
+        const fileRes = await fetch(`/api/citation-checker/files`)
+        if (fileRes.ok) {
+          const files = await fileRes.json()
+          const file = files.find((f: any) => f.id === fileId)
+          if (file && file.citationChecks && file.citationChecks.length > 0) {
+            // Find the latest check with JSON
+            const checkWithJson = file.citationChecks.find((check: any) => check.jsonData)
+            if (checkWithJson) {
+              console.log('[GenerateJsonStep] Found JSON in file check:', checkWithJson.id)
+              setJsonData(JSON.stringify(checkWithJson.jsonData, null, 2))
+              // Update checkId to the one with JSON
+              if (onCheckIdUpdate && checkWithJson.id !== checkId) {
+                onCheckIdUpdate(checkWithJson.id)
+              }
+            } else {
+              console.log('[GenerateJsonStep] No JSON found in file checks')
+            }
+          }
         }
       }
     } catch (error) {
-      console.error("Error loading check:", error)
+      console.error("[GenerateJsonStep] Error loading check:", error)
+    } finally {
+      setLoading(false)
     }
-  }
+  }, [checkId, fileId, onCheckIdUpdate])
+
+  useEffect(() => {
+    loadCheckData()
+  }, [loadCheckData])
 
   const handleGenerate = async (forceRegenerate = false) => {
     if (!fileId) return
@@ -591,11 +623,58 @@ function GenerateJsonStep({
 
   return (
     <div className="space-y-6">
+      {loading && (
+        <p className="text-gray-600">Loading existing JSON...</p>
+      )}
       {jsonData ? (
         <div>
           <p className="text-green-600 mb-4">✓ JSON already generated</p>
-          <div className="mt-4 p-4 bg-gray-50 rounded-md">
-            <pre className="text-sm text-black overflow-auto max-h-96">{jsonData}</pre>
+          <div className="mt-4 p-4 bg-gray-50 rounded-md relative">
+            <div className="absolute top-2 right-2 flex gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(jsonData).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }).catch((err) => {
+                    console.error('Failed to copy:', err)
+                    alert('Failed to copy to clipboard')
+                  })
+                }}
+                className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                title="Copy JSON to clipboard"
+              >
+                {copied ? (
+                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  const blob = new Blob([jsonData], { type: 'application/json' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `citation-check-${fileId || 'document'}-${new Date().toISOString().split('T')[0]}.json`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                }}
+                className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                title="Download JSON file"
+              >
+                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </button>
+            </div>
+            <pre className="text-sm text-black overflow-auto max-h-96 pr-20">{jsonData}</pre>
           </div>
           <div className="mt-4 flex space-x-4">
             <button
@@ -624,8 +703,52 @@ function GenerateJsonStep({
           </button>
 
           {jsonData && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-md">
-              <pre className="text-sm text-black overflow-auto max-h-96">{jsonData}</pre>
+            <div className="mt-4 p-4 bg-gray-50 rounded-md relative">
+              <div className="absolute top-2 right-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(jsonData).then(() => {
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    }).catch((err) => {
+                      console.error('Failed to copy:', err)
+                      alert('Failed to copy to clipboard')
+                    })
+                  }}
+                  className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  title="Copy JSON to clipboard"
+                >
+                  {copied ? (
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([jsonData], { type: 'application/json' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `citation-check-${fileId || 'document'}-${new Date().toISOString().split('T')[0]}.json`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  }}
+                  className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  title="Download JSON file"
+                >
+                  <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </button>
+              </div>
+              <pre className="text-sm text-black overflow-auto max-h-96 pr-20">{jsonData}</pre>
             </div>
           )}
         </>
@@ -676,6 +799,47 @@ function IdentifyCitationsStep({
 
       if (res.ok) {
         const data = await res.json()
+        
+        // Log Eyecite logs to browser console if present
+        if (useEyecite && data.logs && Array.isArray(data.logs)) {
+          console.group(`[Eyecite] Citation Identification Logs`)
+          data.logs.forEach((logEntry: any) => {
+            const { level, message, data: logData, timestamp } = logEntry
+            const time = new Date(timestamp).toLocaleTimeString()
+            const logMessage = `[${time}] ${message}`
+            
+            if (logData !== undefined) {
+              switch (level) {
+                case 'error':
+                  console.error(logMessage, logData)
+                  break
+                case 'warn':
+                  console.warn(logMessage, logData)
+                  break
+                case 'info':
+                  console.info(logMessage, logData)
+                  break
+                default:
+                  console.log(logMessage, logData)
+              }
+            } else {
+              switch (level) {
+                case 'error':
+                  console.error(logMessage)
+                  break
+                case 'warn':
+                  console.warn(logMessage)
+                  break
+                case 'info':
+                  console.info(logMessage)
+                  break
+                default:
+                  console.log(logMessage)
+              }
+            }
+          })
+          console.groupEnd()
+        }
         
         // Update checkId to the new version
         setCurrentCheckId(data.id)

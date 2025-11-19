@@ -77,15 +77,29 @@ export async function POST(
     // Download file from Vercel Blob Storage
     let fileBuffer: ArrayBuffer
     try {
+      console.log('[generate-json] Downloading file from:', fileUpload.blobUrl)
+      console.log('[generate-json] File details:', {
+        filename: fileUpload.originalName,
+        mimeType: fileUpload.mimeType,
+        fileSize: fileUpload.fileSize,
+      })
+      
       const fileResponse = await fetch(fileUpload.blobUrl)
       if (!fileResponse.ok) {
         throw new Error(`Failed to download file: ${fileResponse.statusText}`)
       }
       fileBuffer = await fileResponse.arrayBuffer()
+      console.log('[generate-json] File downloaded successfully, buffer size:', fileBuffer.byteLength)
     } catch (error) {
-      console.error("Error downloading file:", error)
+      console.error("[generate-json] Error downloading file:", error)
+      if (error instanceof Error) {
+        console.error("[generate-json] Download error details:", error.message, error.stack)
+      }
       return NextResponse.json(
-        { error: "Failed to download file from storage" },
+        { 
+          error: "Failed to download file from storage",
+          details: error instanceof Error ? error.message : String(error)
+        },
         { status: 500 }
       )
     }
@@ -93,11 +107,13 @@ export async function POST(
     // Parse Word document to JSON structure
     let jsonData: any
     try {
+      console.log('[generate-json] Starting document parse...')
       jsonData = await parseWordDocument(
         fileBuffer,
         fileUpload.originalName,
         fileUpload.createdAt.toISOString()
       )
+      console.log('[generate-json] Document parsed successfully, content blocks:', jsonData?.document?.content?.length || 0)
     } catch (error) {
       console.error("Error parsing document:", error)
       return NextResponse.json(

@@ -6,7 +6,8 @@
 import { CitationDocument, Citation, ContentParagraph } from '@/types/citation-json'
 import { getCitations } from '@beshkenadze/eyecite'
 import { validateCitation } from './validators'
-import { CitationMatch } from './patterns'
+import { CitationMatch, findAllCitations } from './patterns'
+import { LogCollector } from './logger'
 
 /**
  * Convert Eyecite citation to CitationMatch format for validation
@@ -14,6 +15,8 @@ import { CitationMatch } from './patterns'
 function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: number, endIndex: number): CitationMatch | null {
   const citationText = eyeciteCitation.toString()
   const citationType = eyeciteCitation.constructor.name
+  
+  logger.log(`Converting citation type: ${citationType}, text: ${citationText}`)
   
   // Map Eyecite citation types to our types
   if (citationType === 'FullCaseCitation' || citationType === 'ShortCaseCitation') {
@@ -26,6 +29,10 @@ function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: 
     const court = metadata.court || ''
     const plaintiff = metadata.plaintiff || ''
     const defendant = metadata.defendant || ''
+    
+    logger.log('Case citation components:', {
+      volume, reporter, page, year, court, plaintiff, defendant
+    })
     
     return {
       fullMatch: citationText,
@@ -58,6 +65,10 @@ function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: 
     const plaintiff = metadata.plaintiff || ''
     const defendant = metadata.defendant || ''
     
+    logger.log('Supra/Id citation components:', {
+      volume, reporter, page, year, court, plaintiff, defendant
+    })
+    
     return {
       fullMatch: citationText,
       startIndex,
@@ -75,7 +86,8 @@ function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: 
     }
   }
   
-  // Unknown citations - return null for now, could be handled as secondary
+  // Unknown citations - log and return null
+  logger.warn(`Unknown citation type: ${citationType}, text: ${citationText}`)
   return null
 }
 
@@ -100,24 +112,46 @@ function findCitationPosition(text: string, citationText: string, startFrom: num
   
   if (normalizedIndex !== -1) {
     // Find the actual position accounting for whitespace differences
-    let actualIndex = startFrom
-    let normalizedPos = 0
+    // Count characters in normalized text until we reach the match position
+    let charCount = 0
+    let textIndex = startFrom
     
-    for (let i = startFrom; i < text.length; i++) {
-      if (normalizedPos === normalizedIndex) {
-        return {
-          startIndex: i,
-          endIndex: i + citationText.length, // Approximate
-        }
+    // Count non-whitespace characters in original text
+    while (charCount < normalizedIndex && textIndex < text.length) {
+      if (!text[textIndex].match(/\s/)) {
+        charCount++
       }
-      if (text[i].match(/\s/)) {
-        // Skip whitespace in original but count in normalized
-        if (!text.substring(i).match(/^\s+/)) {
-          normalizedPos++
-        }
-      } else {
-        normalizedPos++
+      textIndex++
+    }
+    
+    // Now find the end position
+    let endCount = 0
+    let endIndex = textIndex
+    const citationLength = normalizedCitation.length
+    
+    while (endCount < citationLength && endIndex < text.length) {
+      if (!text[endIndex].match(/\s/)) {
+        endCount++
       }
+      endIndex++
+    }
+    
+    return {
+      startIndex: textIndex,
+      endIndex: endIndex,
+    }
+  }
+  
+  // Try partial match - maybe Eyecite returns abbreviated citation
+  // Check if citationText is contained in text (case-insensitive)
+  const lowerText = text.toLowerCase()
+  const lowerCitation = citationText.toLowerCase()
+  const partialIndex = lowerText.indexOf(lowerCitation, startFrom)
+  
+  if (partialIndex !== -1) {
+    return {
+      startIndex: partialIndex,
+      endIndex: partialIndex + citationText.length,
     }
   }
   
@@ -126,9 +160,14 @@ function findCitationPosition(text: string, citationText: string, startFrom: num
 
 /**
  * Identify citations using Eyecite and convert to CitationDocument format
+ * Returns both the updated document and logs for browser console
  */
-export function identifyCitationsEyecite(jsonData: CitationDocument): CitationDocument {
+export function identifyCitationsEyecite(jsonData: CitationDocument): { document: CitationDocument; logs: any[] } {
   const { document } = jsonData
+  
+  // Create a new logger instance for this request
+  const logger = new LogCollector()
+  logger.log('Starting Eyecite citation identification')
   
   // Process each content paragraph to find citations
   const allCitations: Citation[] = []
@@ -141,13 +180,32 @@ export function identifyCitationsEyecite(jsonData: CitationDocument): CitationDo
     // Run Eyecite on this paragraph
     let eyeciteCitations: any[] = []
     try {
+      logger.log(`Processing paragraph: ${paragraph.id}`)
+      logger.log(`Text length: ${text.length}`)
+      logger.log(`Text preview: ${text.substring(0, 200)}`)
+      
       eyeciteCitations = getCitations(text)
+      
+      logger.log(`Found ${eyeciteCitations.length} citations in paragraph ${paragraph.id}`)
+      
+      if (eyeciteCitations.length > 0) {
+        eyeciteCitations.forEach((cit, idx) => {
+          logger.log(`Citation ${idx + 1}:`, {
+            type: cit.constructor.name,
+            toString: cit.toString(),
+            volume: cit.volume,
+            reporter: cit.reporter,
+            page: cit.page,
+            year: cit.year,
+            metadata: cit.metadata,
+          })
+        })
+      }
     } catch (error) {
-      console.error('Error running Eyecite on paragraph:', error)
-      return paragraph
-    }
-    
-    if (eyeciteCitations.length === 0) {
+      logger.error('Error running Eyecite on paragraph', error)
+      if (error instanceof Error) {
+        logger.error('Error details', { message: error.message, stack: error.stack })
+      }
       return paragraph
     }
     
@@ -155,20 +213,61 @@ export function identifyCitationsEyecite(jsonData: CitationDocument): CitationDo
     const citationMatches: Array<{ match: CitationMatch; eyecite: any }> = []
     let searchStart = 0
     
+    // Process Eyecite citations (case citations only)
     for (const eyeciteCitation of eyeciteCitations) {
       const citationText = eyeciteCitation.toString()
+      logger.log(`Looking for citation: ${citationText}`)
+      logger.log(`Citation text length: ${citationText.length}`)
+      
       const position = findCitationPosition(text, citationText, searchStart)
+      logger.log(`Position found:`, position)
       
       if (position) {
         const match = eyeciteToCitationMatch(eyeciteCitation, text, position.startIndex, position.endIndex)
+        logger.log(`Converted to CitationMatch:`, match)
+        
         if (match) {
           citationMatches.push({ match, eyecite: eyeciteCitation })
           searchStart = position.endIndex // Continue searching from end of this citation
+        } else {
+          logger.warn('Failed to convert citation to CitationMatch')
+        }
+      } else {
+        logger.warn(`Could not find position for citation: ${citationText}`)
+        // Try to find it without the searchStart constraint
+        const fallbackPosition = findCitationPosition(text, citationText, 0)
+        logger.log(`Fallback position search:`, fallbackPosition)
+        if (fallbackPosition) {
+          const match = eyeciteToCitationMatch(eyeciteCitation, text, fallbackPosition.startIndex, fallbackPosition.endIndex)
+          if (match) {
+            citationMatches.push({ match, eyecite: eyeciteCitation })
+          }
         }
       }
     }
     
+    // HYBRID APPROACH: Eyecite only supports case citations
+    // Use custom patterns for statutes, regulations, and rules
+    logger.log('Checking for non-case citations with custom patterns')
+    const customMatches = findAllCitations(text)
+    logger.log(`Custom patterns found ${customMatches.length} citations`)
+    
+    // Filter out case citations (Eyecite handles those) and add non-case citations
+    const nonCaseMatches = customMatches.filter(m => 
+      m.type !== 'case' && 
+      !citationMatches.some(cm => 
+        Math.abs(cm.match.startIndex - m.startIndex) < 10 && 
+        cm.match.type === 'case'
+      )
+    )
+    
+    logger.log(`Adding ${nonCaseMatches.length} non-case citations from custom patterns`)
+    nonCaseMatches.forEach(match => {
+      citationMatches.push({ match, eyecite: null })
+    })
+    
     if (citationMatches.length === 0) {
+      logger.log(`No citations found in paragraph ${paragraph.id}`)
       return paragraph
     }
     
@@ -271,6 +370,11 @@ export function identifyCitationsEyecite(jsonData: CitationDocument): CitationDo
     },
   }
   
-  return updatedDocument
+  logger.log(`Identification complete. Found ${allCitations.length} total citations`)
+  
+  return {
+    document: updatedDocument,
+    logs: logger.getLogs(),
+  }
 }
 

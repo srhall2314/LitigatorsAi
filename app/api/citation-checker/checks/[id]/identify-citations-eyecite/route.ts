@@ -60,7 +60,8 @@ export async function POST(
 
     // Process citations using Eyecite and update jsonData
     const jsonData = currentCheck.jsonData as any
-    const updatedJsonData = identifyCitationsEyecite(jsonData)
+    const result = identifyCitationsEyecite(jsonData)
+    const { document: updatedJsonData, logs } = result
 
     // Update version with citations
     const updated = await prisma.citationCheck.update({
@@ -71,7 +72,11 @@ export async function POST(
       },
     })
 
-    return NextResponse.json(updated)
+    // Return updated check with logs for browser console
+    return NextResponse.json({
+      ...updated,
+      logs, // Include logs for browser console
+    })
   } catch (error) {
     console.error("Error identifying citations with Eyecite:", error)
     if (error instanceof Error) {
