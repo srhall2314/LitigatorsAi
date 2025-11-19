@@ -566,7 +566,7 @@ function GenerateJsonStep({
         if (data.jsonData) {
           setJsonData(JSON.stringify(data.jsonData, null, 2))
         }
-        // Update checkId if a new version was created (regeneration)
+        // Update checkId if a new version was created (regeneration) or if we got existing check
         if (data.id && data.id !== checkId && onCheckIdUpdate) {
           onCheckIdUpdate(data.id)
         }
@@ -575,11 +575,15 @@ function GenerateJsonStep({
           onComplete()
         }
       } else {
-        alert("Failed to generate JSON")
+        const errorData = await res.json().catch(() => ({ error: "Unknown error" }))
+        const errorMessage = errorData.details || errorData.error || "Failed to generate JSON"
+        alert(`Failed to generate JSON: ${errorMessage}`)
+        console.error("Generate JSON error:", errorData)
       }
     } catch (error) {
       console.error("Generate error:", error)
-      alert("Failed to generate JSON")
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate JSON"
+      alert(`Failed to generate JSON: ${errorMessage}`)
     } finally {
       setGenerating(false)
     }

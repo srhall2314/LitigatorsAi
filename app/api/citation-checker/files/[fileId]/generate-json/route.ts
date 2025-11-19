@@ -53,7 +53,9 @@ export async function POST(
     const forceRegenerate = searchParams.get("force") === "true"
 
     let citationCheck
-    if (hasJson && latestCheck && latestCheck.status === "json_generated" && !forceRegenerate) {
+    // Return existing JSON if it exists and we're not forcing regeneration
+    // Don't check status - just check if jsonData exists
+    if (hasJson && latestCheck && !forceRegenerate) {
       // Use existing check (unless forcing regeneration)
       citationCheck = latestCheck
       return NextResponse.json(citationCheck)
