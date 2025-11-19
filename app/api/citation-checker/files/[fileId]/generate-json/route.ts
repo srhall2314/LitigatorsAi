@@ -53,7 +53,7 @@ export async function POST(
     const forceRegenerate = searchParams.get("force") === "true"
 
     let citationCheck
-    if (hasJson && latestCheck.status === "json_generated" && !forceRegenerate) {
+    if (hasJson && latestCheck && latestCheck.status === "json_generated" && !forceRegenerate) {
       // Use existing check (unless forcing regeneration)
       citationCheck = latestCheck
       return NextResponse.json(citationCheck)
@@ -119,8 +119,14 @@ export async function POST(
     return NextResponse.json(updated)
   } catch (error) {
     console.error("Error generating JSON:", error)
+    if (error instanceof Error) {
+      console.error("Error details:", error.message, error.stack)
+    }
     return NextResponse.json(
-      { error: "Failed to generate JSON" },
+      { 
+        error: "Failed to generate JSON",
+        details: error instanceof Error ? error.message : String(error)
+      },
       { status: 500 }
     )
   }
