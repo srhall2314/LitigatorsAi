@@ -47,10 +47,14 @@ export async function POST(
     // Check if JSON already exists
     const latestCheck = fileUpload.citationChecks[0]
     const hasJson = latestCheck && latestCheck.jsonData
+    
+    // Check for force regeneration parameter
+    const { searchParams } = new URL(request.url)
+    const forceRegenerate = searchParams.get("force") === "true"
 
     let citationCheck
-    if (hasJson && latestCheck.status === "json_generated") {
-      // Use existing check
+    if (hasJson && latestCheck.status === "json_generated" && !forceRegenerate) {
+      // Use existing check (unless forcing regeneration)
       citationCheck = latestCheck
       return NextResponse.json(citationCheck)
     } else {

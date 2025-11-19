@@ -20,6 +20,7 @@ export interface CitationMetadata {
   uploadDate: string; // ISO 8601
   documentType?: string; // motion, brief, memo, etc.
   totalCitations: number;
+  identificationMethod?: 'custom' | 'eyecite'; // Method used to identify citations
 }
 
 export interface ContentParagraph {

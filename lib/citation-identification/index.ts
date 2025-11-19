@@ -116,6 +116,7 @@ export function identifyCitations(jsonData: CitationDocument): CitationDocument 
       metadata: {
         ...document.metadata,
         totalCitations: allCitations.length,
+        identificationMethod: 'custom',
       },
     },
   }

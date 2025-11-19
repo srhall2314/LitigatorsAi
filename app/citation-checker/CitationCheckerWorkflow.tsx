@@ -116,6 +116,7 @@ export function CitationCheckerWorkflow() {
           onComplete={() => handleStepComplete("generate-json")}
           fileId={selectedFileId}
           checkId={selectedCheckId}
+          onCheckIdUpdate={updateSelectedCheckId}
         />
       ),
     },
@@ -513,11 +514,13 @@ function UploadStep({
 function GenerateJsonStep({ 
   onComplete, 
   fileId, 
-  checkId 
+  checkId,
+  onCheckIdUpdate
 }: { 
   onComplete: () => void
   fileId: string | null
   checkId: string | null
+  onCheckIdUpdate?: (newCheckId: string) => void
 }) {
   const [generating, setGenerating] = useState(false)
   const [jsonData, setJsonData] = useState<string | null>(null)
@@ -544,12 +547,16 @@ function GenerateJsonStep({
     }
   }
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (forceRegenerate = false) => {
     if (!fileId) return
 
     setGenerating(true)
     try {
-      const res = await fetch(`/api/citation-checker/files/${fileId}/generate-json`, {
+      const url = forceRegenerate 
+        ? `/api/citation-checker/files/${fileId}/generate-json?force=true`
+        : `/api/citation-checker/files/${fileId}/generate-json`
+      
+      const res = await fetch(url, {
         method: "POST",
       })
 
@@ -559,7 +566,14 @@ function GenerateJsonStep({
         if (data.jsonData) {
           setJsonData(JSON.stringify(data.jsonData, null, 2))
         }
-        onComplete()
+        // Update checkId if a new version was created (regeneration)
+        if (data.id && data.id !== checkId && onCheckIdUpdate) {
+          onCheckIdUpdate(data.id)
+        }
+        // Only auto-advance if this was initial generation, not regeneration
+        if (!forceRegenerate) {
+          onComplete()
+        }
       } else {
         alert("Failed to generate JSON")
       }
@@ -579,17 +593,26 @@ function GenerateJsonStep({
           <div className="mt-4 p-4 bg-gray-50 rounded-md">
             <pre className="text-sm text-black overflow-auto max-h-96">{jsonData}</pre>
           </div>
-          <button
-            onClick={onComplete}
-            className="mt-4 px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-          >
-            Continue to Next Step
-          </button>
+          <div className="mt-4 flex space-x-4">
+            <button
+              onClick={() => handleGenerate(true)}
+              disabled={generating || !fileId}
+              className="px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+            >
+              {generating ? "Regenerating JSON..." : "Regenerate JSON"}
+            </button>
+            <button
+              onClick={onComplete}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+            >
+              Continue to Next Step
+            </button>
+          </div>
         </div>
       ) : (
         <>
           <button
-            onClick={handleGenerate}
+            onClick={() => handleGenerate(false)}
             disabled={generating || !fileId}
             className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
           >
@@ -619,21 +642,31 @@ function IdentifyCitationsStep({
   onCheckIdUpdate?: (newCheckId: string) => void
 }) {
   const [identifying, setIdentifying] = useState(false)
+  const [identifyingEyecite, setIdentifyingEyecite] = useState(false)
   const [citations, setCitations] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [currentCheckId, setCurrentCheckId] = useState<string | null>(checkId)
+  const [identificationMethod, setIdentificationMethod] = useState<string | null>(null)
 
-  const handleIdentify = async () => {
+  const handleIdentify = async (useEyecite: boolean = false) => {
     if (!checkId) {
       setError("No citation check selected")
       return
     }
 
-    setIdentifying(true)
+    if (useEyecite) {
+      setIdentifyingEyecite(true)
+    } else {
+      setIdentifying(true)
+    }
     setError(null)
     
     try {
-      const res = await fetch(`/api/citation-checker/checks/${checkId}/identify-citations`, {
+      const endpoint = useEyecite 
+        ? `/api/citation-checker/checks/${checkId}/identify-citations-eyecite`
+        : `/api/citation-checker/checks/${checkId}/identify-citations`
+      
+      const res = await fetch(endpoint, {
         method: "POST",
       })
 
@@ -654,28 +687,54 @@ function IdentifyCitationsStep({
           setCitations(citationTexts)
         }
         
+        // Track which method was used
+        setIdentificationMethod(useEyecite ? 'eyecite' : 'custom')
+        
         onComplete()
       } else {
         const errorData = await res.json()
-        setError(errorData.error || errorData.details || "Failed to identify citations")
+        setError(errorData.error || errorData.details || `Failed to identify citations${useEyecite ? ' with Eyecite' : ''}`)
       }
     } catch (err) {
       console.error("Identify citations error:", err)
-      setError("Failed to identify citations")
+      setError(`Failed to identify citations${useEyecite ? ' with Eyecite' : ''}`)
     } finally {
-      setIdentifying(false)
+      if (useEyecite) {
+        setIdentifyingEyecite(false)
+      } else {
+        setIdentifying(false)
+      }
     }
   }
 
   return (
     <div className="space-y-6">
-      <button
-        onClick={handleIdentify}
-        disabled={identifying || !checkId}
-        className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-      >
-        {identifying ? "Identifying Citations..." : "Identify Citations"}
-      </button>
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Citation Identification Method</h3>
+          <div className="flex gap-4">
+            <button
+              onClick={() => handleIdentify(false)}
+              disabled={identifying || identifyingEyecite || !checkId}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              {identifying ? "Identifying..." : "Identify Citations (Custom)"}
+            </button>
+            <button
+              onClick={() => handleIdentify(true)}
+              disabled={identifying || identifyingEyecite || !checkId}
+              className="px-6 py-3 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+            >
+              {identifyingEyecite ? "Identifying..." : "Identify Citations (Eyecite)"}
+            </button>
+          </div>
+        </div>
+        {identificationMethod && (
+          <div className="text-sm text-gray-600">
+            Last used: <span className="font-medium">{identificationMethod === 'eyecite' ? 'Eyecite' : 'Custom Regex'}</span>
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-md">
