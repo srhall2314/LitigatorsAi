@@ -3,9 +3,14 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
-import { UploadPage } from "./components/UploadPage"
+import { ReviewDiscrepanciesPage } from "../../components/ReviewDiscrepanciesPage"
+import { StepProgress } from "../../components/StepProgress"
 
-export default async function CitationCheckerPage() {
+export default async function ReviewDiscrepanciesPageRoute({
+  params,
+}: {
+  params: { fileId: string }
+}) {
   const session = await getServerSession(authOptions)
 
   if (!session?.user?.email) {
@@ -26,16 +31,22 @@ export default async function CitationCheckerPage() {
             </p>
           </div>
 
+          <StepProgress 
+            currentStep="review-discrepancies" 
+            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations"])}
+            fileId={params.fileId}
+          />
+
           <div className="border border-gray-200 rounded-lg p-8 bg-white">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black mb-2">
-                Step 1: Upload File
+                Step 5: Review Discrepancies
               </h2>
               <p className="text-black text-gray-600">
-                Upload your document to begin citation checking
+                Review and address any citation discrepancies
               </p>
             </div>
-            <UploadPage />
+            <ReviewDiscrepanciesPage fileId={params.fileId} />
           </div>
         </div>
       </main>
@@ -43,3 +54,4 @@ export default async function CitationCheckerPage() {
     </div>
   )
 }
+

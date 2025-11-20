@@ -52,11 +52,33 @@ export function identifyCitations(jsonData: CitationDocument): CitationDocument 
           year: parseInt(match.components.year),
         }
       } else if (match.type === 'statute') {
-        extractedComponents = {
-          title: match.components.volume,
-          code: match.components.code,
-          section: match.components.section,
-          subdivision: null,
+        // Handle different statute types
+        if (match.components.code === 'Act') {
+          // Act name citation
+          extractedComponents = {
+            title: '',
+            code: 'Act',
+            section: match.components.act_name || match.components.section,
+            act_name: match.components.act_name,
+            acronym: match.components.acronym || null,
+            subdivision: null,
+          }
+        } else if (match.components.code === 'Rev. Stat.') {
+          // Revised Statutes
+          extractedComponents = {
+            title: '',
+            code: 'Rev. Stat.',
+            section: match.components.section,
+            subdivision: null,
+          }
+        } else {
+          // Standard U.S.C. statute
+          extractedComponents = {
+            title: match.components.volume,
+            code: match.components.code,
+            section: match.components.section,
+            subdivision: null,
+          }
         }
       } else if (match.type === 'regulation') {
         extractedComponents = {
@@ -65,10 +87,19 @@ export function identifyCitations(jsonData: CitationDocument): CitationDocument 
           section: match.components.section,
         }
       } else if (match.type === 'rule') {
-        extractedComponents = {
-          ruleSet: `Federal Rules of ${match.components.category}`,
-          rule: match.components.rule_number,
-          subdivision: null,
+        // Handle both federal and local rules
+        if (match.components.code === 'Local Rule') {
+          extractedComponents = {
+            ruleSet: 'Local Rules',
+            rule: match.components.rule_number,
+            subdivision: null,
+          }
+        } else {
+          extractedComponents = {
+            ruleSet: `Federal Rules of ${match.components.category}`,
+            rule: match.components.rule_number,
+            subdivision: null,
+          }
         }
       } else {
         extractedComponents = match.components

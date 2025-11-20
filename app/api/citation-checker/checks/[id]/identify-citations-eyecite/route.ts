@@ -23,7 +23,7 @@ export async function POST(
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // Get the current CitationCheck (should be version 1 with json_generated status)
+    // Get the current CitationCheck
     const currentCheck = await prisma.citationCheck.findUnique({
       where: { id: params.id },
     })
@@ -32,9 +32,27 @@ export async function POST(
       return NextResponse.json({ error: "Citation check not found" }, { status: 404 })
     }
 
-    if (!currentCheck.jsonData) {
+    // Find the base version (version 1 with json_generated status) that has the original unprocessed JSON
+    // This ensures we always regenerate from clean, unmarked text
+    const baseCheck = await prisma.citationCheck.findFirst({
+      where: { 
+        fileUploadId: currentCheck.fileUploadId,
+        status: "json_generated",
+      },
+      orderBy: { version: "asc" }, // Get the earliest version with json_generated status
+    })
+
+    // Fallback to version 1 if no json_generated status found
+    const sourceCheck = baseCheck || await prisma.citationCheck.findFirst({
+      where: { 
+        fileUploadId: currentCheck.fileUploadId,
+        version: 1,
+      },
+    })
+
+    if (!sourceCheck || !sourceCheck.jsonData) {
       return NextResponse.json(
-        { error: "JSON data not found. Please generate JSON first." },
+        { error: "Base JSON data not found. Please generate JSON first." },
         { status: 400 }
       )
     }
@@ -47,27 +65,54 @@ export async function POST(
 
     const nextVersion = latestVersion ? latestVersion.version + 1 : 1
 
-    // Create new version by copying jsonData from current version
+    // Create new version by copying jsonData from base version (unprocessed JSON)
     const newVersion = await prisma.citationCheck.create({
       data: {
         fileUploadId: currentCheck.fileUploadId,
         userId: user.id,
         version: nextVersion,
         status: "citations_identified",
-        jsonData: currentCheck.jsonData as any, // Copy from current version
+        jsonData: sourceCheck.jsonData as any, // Copy from base version (unprocessed)
       },
     })
 
     // Process citations using Eyecite and update jsonData
-    const jsonData = currentCheck.jsonData as any
-    const result = identifyCitationsEyecite(jsonData)
+    // Use the base version's jsonData which should have no citation markers
+    const jsonData = sourceCheck.jsonData as any
+    console.log('[Eyecite API] Input jsonData structure:', {
+      hasDocument: !!jsonData?.document,
+      hasContent: !!jsonData?.document?.content,
+      contentLength: jsonData?.document?.content?.length,
+    })
+    
+    let result
+    try {
+      result = identifyCitationsEyecite(jsonData)
+      console.log('[Eyecite API] Result structure:', {
+        hasDocument: !!result?.document,
+        hasLogs: Array.isArray(result?.logs),
+        logsLength: result?.logs?.length,
+      })
+    } catch (error) {
+      console.error('[Eyecite API] Error in identifyCitationsEyecite:', error)
+      if (error instanceof Error) {
+        console.error('[Eyecite API] Error stack:', error.stack)
+      }
+      throw error
+    }
+    
     const { document: updatedJsonData, logs } = result
+    
+    // updatedJsonData is a CitationDocument, which has a document property
+    // We need to store the full CitationDocument structure
+    console.log('[Eyecite API] updatedJsonData type:', typeof updatedJsonData)
+    console.log('[Eyecite API] updatedJsonData has document property:', 'document' in updatedJsonData)
 
     // Update version with citations
     const updated = await prisma.citationCheck.update({
       where: { id: newVersion.id },
       data: {
-        jsonData: updatedJsonData as any,
+        jsonData: updatedJsonData as any, // This is the full CitationDocument
         status: "citations_identified",
       },
     })
@@ -78,14 +123,24 @@ export async function POST(
       logs, // Include logs for browser console
     })
   } catch (error) {
-    console.error("Error identifying citations with Eyecite:", error)
+    console.error("[Eyecite API] Error identifying citations with Eyecite:", error)
     if (error instanceof Error) {
-      console.error("Error details:", error.message, error.stack)
+      console.error("[Eyecite API] Error name:", error.name)
+      console.error("[Eyecite API] Error message:", error.message)
+      console.error("[Eyecite API] Error stack:", error.stack)
+    } else {
+      console.error("[Eyecite API] Non-Error object:", JSON.stringify(error, null, 2))
     }
+    
+    const errorMessage = error instanceof Error 
+      ? `${error.name}: ${error.message}` 
+      : String(error)
+    
     return NextResponse.json(
       { 
         error: "Failed to identify citations with Eyecite",
-        details: error instanceof Error ? error.message : String(error)
+        details: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined
       },
       { status: 500 }
     )

@@ -3,9 +3,14 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
-import { UploadPage } from "./components/UploadPage"
+import { GenerateJsonPage } from "../../components/GenerateJsonPage"
+import { StepProgress } from "../../components/StepProgress"
 
-export default async function CitationCheckerPage() {
+export default async function GenerateJsonPageRoute({
+  params,
+}: {
+  params: { fileId: string }
+}) {
   const session = await getServerSession(authOptions)
 
   if (!session?.user?.email) {
@@ -26,16 +31,22 @@ export default async function CitationCheckerPage() {
             </p>
           </div>
 
+          <StepProgress 
+            currentStep="generate-json" 
+            completedSteps={new Set(["upload"])}
+            fileId={params.fileId}
+          />
+
           <div className="border border-gray-200 rounded-lg p-8 bg-white">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black mb-2">
-                Step 1: Upload File
+                Step 2: Generate JSON
               </h2>
               <p className="text-black text-gray-600">
-                Upload your document to begin citation checking
+                Convert document to structured JSON format
               </p>
             </div>
-            <UploadPage />
+            <GenerateJsonPage fileId={params.fileId} />
           </div>
         </div>
       </main>
@@ -43,3 +54,4 @@ export default async function CitationCheckerPage() {
     </div>
   )
 }
+

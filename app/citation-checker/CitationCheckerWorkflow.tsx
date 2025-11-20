@@ -770,7 +770,7 @@ function IdentifyCitationsStep({
 }) {
   const [identifying, setIdentifying] = useState(false)
   const [identifyingEyecite, setIdentifyingEyecite] = useState(false)
-  const [citations, setCitations] = useState<string[]>([])
+  const [citations, setCitations] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
   const [currentCheckId, setCurrentCheckId] = useState<string | null>(checkId)
   const [identificationMethod, setIdentificationMethod] = useState<string | null>(null)
@@ -849,10 +849,8 @@ function IdentifyCitationsStep({
         
         // Extract citations from jsonData
         if (data.jsonData?.document?.citations) {
-          const citationTexts = data.jsonData.document.citations.map(
-            (cit: any) => cit.citationText
-          )
-          setCitations(citationTexts)
+          const citations = data.jsonData.document.citations
+          setCitations(citations)
         }
         
         // Track which method was used
@@ -860,8 +858,15 @@ function IdentifyCitationsStep({
         
         onComplete()
       } else {
-        const errorData = await res.json()
-        setError(errorData.error || errorData.details || `Failed to identify citations${useEyecite ? ' with Eyecite' : ''}`)
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.details || errorData.error || `Failed to identify citations${useEyecite ? ' with Eyecite' : ''}`
+        console.error('[IdentifyCitationsStep] API Error:', errorData)
+        setError(errorMessage)
+        
+        // Log detailed error if available
+        if (errorData.stack) {
+          console.error('[IdentifyCitationsStep] Error stack:', errorData.stack)
+        }
       }
     } catch (err) {
       console.error("Identify citations error:", err)
@@ -911,15 +916,37 @@ function IdentifyCitationsStep({
       )}
 
       {citations.length > 0 && (
-        <div className="mt-4">
-          <h3 className="text-lg font-semibold text-black mb-2">
-            Found {citations.length} Citations
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-md">
+          <h3 className="text-lg font-semibold text-gray-900 mb-3">
+            Found {citations.length} {citations.length === 1 ? 'Citation' : 'Citations'}
           </h3>
-          <ul className="list-disc list-inside space-y-2 text-black">
-            {citations.map((citation, index) => (
-              <li key={index}>{citation}</li>
-            ))}
-          </ul>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {citations.map((citation: any, index: number) => {
+              const type = citation.citationType || 'unknown'
+              const text = citation.citationText || ''
+              const typeColor = {
+                case: 'bg-blue-100 text-blue-800',
+                statute: 'bg-green-100 text-green-800',
+                regulation: 'bg-purple-100 text-purple-800',
+                rule: 'bg-orange-100 text-orange-800',
+                unknown: 'bg-gray-100 text-gray-800'
+              }[type] || 'bg-gray-100 text-gray-800'
+              
+              return (
+                <div 
+                  key={citation.id || index} 
+                  className="flex items-start gap-2 p-2 bg-white rounded border border-gray-200 hover:border-gray-300 transition-colors"
+                >
+                  <span className={`px-2 py-0.5 text-xs font-medium rounded ${typeColor} flex-shrink-0`}>
+                    {type.toUpperCase()}
+                  </span>
+                  <span className="text-sm text-gray-700 flex-1 break-words">
+                    {text.length > 100 ? `${text.substring(0, 100)}...` : text}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
       
@@ -943,6 +970,28 @@ function ValidateCitationsStep({
 }) {
   const [validating, setValidating] = useState(false)
   const [results, setResults] = useState<{ valid: number; invalid: number } | null>(null)
+  const [citations, setCitations] = useState<any[]>([])
+  
+  // Load citations from check data
+  useEffect(() => {
+    if (!checkId) return
+    
+    const loadCitations = async () => {
+      try {
+        const res = await fetch(`/api/citation-checker/checks/${checkId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (data.jsonData?.document?.citations) {
+            setCitations(data.jsonData.document.citations)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load citations:', err)
+      }
+    }
+    
+    loadCitations()
+  }, [checkId])
 
   const handleValidate = async () => {
     setValidating(true)
@@ -975,6 +1024,46 @@ function ValidateCitationsStep({
               <div className="text-sm text-gray-600">Invalid Citations</div>
               <div className="text-2xl font-bold text-red-600">{results.invalid}</div>
             </div>
+          </div>
+        </div>
+      )}
+      
+      {citations.length > 0 && (
+        <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-md">
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">
+            Citations ({citations.length})
+          </h3>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {citations.slice(0, 10).map((citation: any, index: number) => {
+              const type = citation.citationType || 'unknown'
+              const text = citation.citationText || ''
+              const typeColor = {
+                case: 'bg-blue-100 text-blue-800',
+                statute: 'bg-green-100 text-green-800',
+                regulation: 'bg-purple-100 text-purple-800',
+                rule: 'bg-orange-100 text-orange-800',
+                unknown: 'bg-gray-100 text-gray-800'
+              }[type] || 'bg-gray-100 text-gray-800'
+              
+              return (
+                <div 
+                  key={citation.id || index} 
+                  className="flex items-center gap-2 p-1.5 bg-white rounded text-xs"
+                >
+                  <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${typeColor} flex-shrink-0`}>
+                    {type.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="text-xs text-gray-600 flex-1 truncate">
+                    {text.length > 60 ? `${text.substring(0, 60)}...` : text}
+                  </span>
+                </div>
+              )
+            })}
+            {citations.length > 10 && (
+              <div className="text-xs text-gray-500 text-center pt-1">
+                ...and {citations.length - 10} more
+              </div>
+            )}
           </div>
         </div>
       )}

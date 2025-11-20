@@ -15,6 +15,52 @@ export type Tier2Consensus = "VALID" | "FLAG_FOR_REVIEW";
 
 export type Tier3Severity = "LOW" | "MEDIUM" | "HIGH";
 
+// Tier 3 Validation Types (per tier3prompt.md)
+export type Tier3Verdict = 
+  | "VERIFIED_REAL" 
+  | "LIKELY_REAL" 
+  | "LIKELY_FABRICATED" 
+  | "NEEDS_HUMAN_REVIEW";
+
+export type Tier3Confidence = "high" | "medium" | "low";
+
+// Tier 2 Validation Types (per validationT2.md)
+export type ValidationVerdict = "VALID" | "INVALID" | "UNCERTAIN";
+
+export type AgreementLevel = "unanimous" | "strong" | "split";
+
+export type CitationRecommendationType = 
+  | "CITATION_LIKELY_VALID" 
+  | "CITATION_UNCERTAIN" 
+  | "CITATION_LIKELY_HALLUCINATED";
+
+export interface AgentVerdict {
+  agent: string; // e.g., "citation_authority_validator_v1"
+  verdict: ValidationVerdict;
+  invalid_reason?: string; // Reason code if verdict is INVALID
+  uncertain_reason?: string; // Reason code if verdict is UNCERTAIN
+  timestamp: string; // ISO 8601 timestamp
+  model: string; // e.g., "claude-haiku-4-5-20251001"
+}
+
+export interface Consensus {
+  agreement_level: AgreementLevel;
+  verdict_counts: {
+    VALID: number;
+    INVALID: number;
+    UNCERTAIN: number;
+  };
+  confidence_score: number; // 0.0-1.0
+  recommendation: CitationRecommendationType;
+  reasoning: string;
+  tier_3_trigger: boolean;
+}
+
+export interface CitationValidation {
+  panel_evaluation: AgentVerdict[];
+  consensus: Consensus;
+}
+
 export interface CitationMetadata {
   filename: string;
   uploadDate: string; // ISO 8601
@@ -82,8 +128,13 @@ export interface Tier2Result {
 }
 
 export interface Tier3Result {
-  analysis: string; // Plain English explanation
-  severity: Tier3Severity;
+  verdict: Tier3Verdict;
+  reasoning: string; // 2-3 sentences explaining the assessment
+  key_evidence: string; // Key evidence supporting the assessment
+  remaining_uncertainties?: string; // Remaining uncertainties (if any)
+  confidence: Tier3Confidence; // high/medium/low
+  timestamp: string; // ISO 8601 timestamp
+  model: string; // e.g., "claude-3-sonnet-20240229"
 }
 
 export interface CitationRecommendation {
@@ -100,6 +151,7 @@ export interface Citation {
   tier_2: Tier2Result;
   tier_3: Tier3Result | null; // null if not escalated
   recommendations: CitationRecommendation[] | null; // null until Phase 2
+  validation?: CitationValidation; // Tier 2 validation results (per validationT2.md)
 }
 
 export interface CitationDocument {

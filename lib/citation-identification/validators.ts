@@ -15,35 +15,65 @@ export interface Tier1Result {
 
 /**
  * Validate a case citation and determine tier_1 status
+ * 
+ * Required components for VALID_FORMAT:
+ * - reporter (must be valid)
+ * - volume (must exist)
+ * - page (must exist)
+ * 
+ * Optional components (don't affect validity):
+ * - court (often in parenthetical, not always present)
+ * - year (often in parenthetical, not always present)
  */
 export function validateCaseCitation(match: CitationMatch): Tier1Result {
   const { components } = match
-  const reporter = components.reporter
-  const court = components.court
-  const year = parseInt(components.year)
+  const reporter = components.reporter || ''
+  const volume = components.volume || ''
+  const page = components.page || ''
+  const court = components.court || ''
+  const yearStr = components.year || ''
   
-  // Check if reporter is valid
+  // Required: reporter must be valid
   const reporterValid = isValidReporter(reporter)
   
-  // Check if court is valid
-  const courtValid = isValidCourt(court)
+  // Required: volume must exist
+  const volumeExists = volume.trim().length > 0
   
-  // Check if year is reasonable (1800 to current year + 1)
-  const currentYear = new Date().getFullYear()
-  const yearValid = year >= 1800 && year <= currentYear + 1
+  // Required: page must exist (can be "___" for not-yet-paginated cases)
+  const pageExists = page.trim().length > 0
+  const pageValid = pageExists && (page.trim() === '___' || /^\d+/.test(page.trim()))
   
-  // Determine status
-  if (reporterValid && courtValid && yearValid) {
+  // Optional: court validation (if present, should be valid, but absence is OK)
+  const courtValid = !court || isValidCourt(court)
+  
+  // Optional: year validation (if present, should be reasonable, but absence is OK)
+  let yearValid = true
+  if (yearStr && yearStr.trim().length > 0) {
+    const year = parseInt(yearStr)
+    const currentYear = new Date().getFullYear()
+    yearValid = !isNaN(year) && year >= 1800 && year <= currentYear + 1
+  }
+  
+  // VALID_FORMAT: reporter is valid AND volume/page exist
+  // Court and year are optional - their presence/absence doesn't affect format validity
+  // Page can be "___" for not-yet-paginated cases
+  if (reporterValid && volumeExists && pageValid) {
+    // Higher confidence if court/year are also present and valid
+    const hasOptionalInfo = (court && isValidCourt(court)) || (yearStr && yearValid)
     return {
       status: 'VALID_FORMAT',
-      confidence: 0.99,
+      confidence: hasOptionalInfo ? 0.99 : 0.95,
     }
-  } else if (!reporterValid || !courtValid) {
+  } 
+  // INVALID_FORMAT: missing required components or invalid reporter
+  else if (!reporterValid || !volumeExists || !pageExists) {
     return {
       status: 'INVALID_FORMAT',
       confidence: 0.85,
     }
-  } else {
+  } 
+  // AMBIGUOUS_FORMAT: has required components but optional ones are invalid
+  else {
     return {
       status: 'AMBIGUOUS_FORMAT',
       confidence: 0.70,
