@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import Link from "next/link"
+import Image from "next/image"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
 
@@ -82,10 +83,12 @@ export default async function AdminPage() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           {user.image && (
-                            <img
+                            <Image
                               className="h-10 w-10 rounded-full mr-3"
                               src={user.image}
                               alt={user.name || ""}
+                              width={40}
+                              height={40}
                             />
                           )}
                           <div className="text-sm font-medium text-black">

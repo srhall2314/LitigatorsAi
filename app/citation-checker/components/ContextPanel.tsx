@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 
 interface ContextPanelProps {
   fileId: string | null
@@ -23,13 +23,7 @@ export function ContextPanel({
   const [validationResults, setValidationResults] = useState<{ valid: number; invalid: number } | null>(null)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
-    if (checkId) {
-      loadContextData()
-    }
-  }, [checkId])
-
-  const loadContextData = async () => {
+  const loadContextData = useCallback(async () => {
     if (!checkId) return
     
     try {
@@ -63,7 +57,13 @@ export function ContextPanel({
     } catch (error) {
       console.error("Error loading context data:", error)
     }
-  }
+  }, [checkId])
+
+  useEffect(() => {
+    if (checkId) {
+      loadContextData()
+    }
+  }, [checkId, loadContextData])
 
   if (!fileInfo && !jsonData && !citationCount) {
     return null

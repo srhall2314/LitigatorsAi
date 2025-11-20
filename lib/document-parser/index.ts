@@ -10,7 +10,7 @@ import { ContentParagraph, CitationDocument, CitationMetadata } from '@/types/ci
 function toMammothBuffer(buffer: ArrayBuffer): { arrayBuffer?: ArrayBuffer; buffer?: Buffer } {
   // Try to use Buffer if available (Node.js runtime)
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line
     const Buffer = require('buffer').Buffer
     if (Buffer && typeof Buffer.from === 'function') {
       return { buffer: Buffer.from(buffer) }

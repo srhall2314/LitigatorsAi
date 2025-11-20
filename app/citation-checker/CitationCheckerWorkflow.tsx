@@ -267,9 +267,9 @@ function ContextPanel({
     if (checkId) {
       loadContextData()
     }
-  }, [checkId])
+  }, [checkId, loadContextData])
 
-  const loadContextData = async () => {
+  const loadContextData = useCallback(async () => {
     if (!checkId) return
     
     try {
@@ -308,7 +308,7 @@ function ContextPanel({
     } catch (error) {
       console.error("Error loading context data:", error)
     }
-  }
+  }, [checkId])
 
   if (!fileInfo && !jsonData && !citationCount) {
     return null
