@@ -49,7 +49,7 @@ export async function POST(
       )
     }
 
-    const jsonData = currentCheck.jsonData as CitationDocument
+    const jsonData = currentCheck.jsonData as unknown as CitationDocument
     
     // Find citation by citationId
     if (!jsonData.document?.citations) {
