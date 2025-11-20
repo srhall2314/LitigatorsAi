@@ -14,6 +14,7 @@ interface CitationWithValidation {
   citationText: string
   citationType: string
   validation?: CitationValidation
+  tier_3?: any
   extractedComponents?: any
   paragraphId?: string
   paragraphText?: string

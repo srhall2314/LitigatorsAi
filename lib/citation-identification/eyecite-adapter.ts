@@ -740,8 +740,8 @@ export function identifyCitationsEyecite(jsonData: CitationDocument): { document
       }
       
       // Filter out unknown citation types
-      if (citation.citationType === 'unknown' || !citation.citationType) {
-        logger.warn(`Filtering out unknown citation type: ${citation.id}`)
+      if (!citation.citationType || citation.citationType === 'secondary') {
+        logger.warn(`Filtering out citation type: ${citation.citationType || 'unknown'} for citation ${citation.id}`)
         return false
       }
       
@@ -773,19 +773,21 @@ export function identifyCitationsEyecite(jsonData: CitationDocument): { document
           normalizedText = `${volume} ${reporter} ${page}`
         } else {
           // Fallback: use reporter and page from components
-          const reporter = (citation.extractedComponents.reporter || '').toLowerCase()
-          const page = citation.extractedComponents.page || ''
-          if (reporter && page) {
-            normalizedText = `${reporter} ${page}`
+          if (citation.citationType === 'case' && 'reporter' in citation.extractedComponents && 'page' in citation.extractedComponents) {
+            const reporter = (citation.extractedComponents.reporter || '').toLowerCase()
+            const page = citation.extractedComponents.page || ''
+            if (reporter && page) {
+              normalizedText = `${reporter} ${page}`
+            }
           }
         }
       }
       
       // For statutes/regulations, normalize title/code/section
       if ((citation.citationType === 'statute' || citation.citationType === 'regulation') && citation.extractedComponents) {
-        const title = citation.extractedComponents.title || citation.extractedComponents.volume || ''
-        const code = citation.extractedComponents.code || ''
-        const section = citation.extractedComponents.section || ''
+        const title = ('title' in citation.extractedComponents ? citation.extractedComponents.title : '') || ('volume' in citation.extractedComponents ? citation.extractedComponents.volume : '') || ''
+        const code = ('code' in citation.extractedComponents ? citation.extractedComponents.code : '') || ''
+        const section = ('section' in citation.extractedComponents ? citation.extractedComponents.section : '') || ''
         if (title && code && section) {
           normalizedText = `${title} ${code} § ${section}`.toLowerCase().replace(/\s+/g, ' ')
         }

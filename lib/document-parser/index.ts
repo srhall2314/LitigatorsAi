@@ -7,7 +7,7 @@ import mammoth from 'mammoth'
 import { ContentParagraph, CitationDocument, CitationMetadata } from '@/types/citation-json'
 
 // Helper to convert ArrayBuffer to Buffer if needed (for Node.js runtime)
-function toMammothBuffer(buffer: ArrayBuffer): { arrayBuffer?: ArrayBuffer; buffer?: Buffer } {
+function toMammothBuffer(buffer: ArrayBuffer): { arrayBuffer: ArrayBuffer } | { buffer: Buffer } {
   // Try to use Buffer if available (Node.js runtime)
   try {
     // eslint-disable-next-line

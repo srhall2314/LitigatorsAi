@@ -263,12 +263,6 @@ function ContextPanel({
   const [citationCount, setCitationCount] = useState<number | null>(null)
   const [validationResults, setValidationResults] = useState<{ valid: number; invalid: number } | null>(null)
 
-  useEffect(() => {
-    if (checkId) {
-      loadContextData()
-    }
-  }, [checkId, loadContextData])
-
   const loadContextData = useCallback(async () => {
     if (!checkId) return
     
@@ -309,6 +303,12 @@ function ContextPanel({
       console.error("Error loading context data:", error)
     }
   }, [checkId])
+
+  useEffect(() => {
+    if (checkId) {
+      loadContextData()
+    }
+  }, [checkId, loadContextData])
 
   if (!fileInfo && !jsonData && !citationCount) {
     return null
@@ -922,7 +922,7 @@ function IdentifyCitationsStep({
           </h3>
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {citations.map((citation: any, index: number) => {
-              const type = citation.citationType || 'unknown'
+              const type = (citation.citationType || 'unknown') as 'case' | 'statute' | 'regulation' | 'rule' | 'unknown'
               const text = citation.citationText || ''
               const typeColor = {
                 case: 'bg-blue-100 text-blue-800',
@@ -1035,7 +1035,7 @@ function ValidateCitationsStep({
           </h3>
           <div className="space-y-1 max-h-64 overflow-y-auto">
             {citations.slice(0, 10).map((citation: any, index: number) => {
-              const type = citation.citationType || 'unknown'
+              const type = (citation.citationType || 'unknown') as 'case' | 'statute' | 'regulation' | 'rule' | 'unknown'
               const text = citation.citationText || ''
               const typeColor = {
                 case: 'bg-blue-100 text-blue-800',

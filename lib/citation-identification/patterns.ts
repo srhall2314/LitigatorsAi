@@ -340,7 +340,7 @@ export function findActNameCitations(text: string): CitationMatch[] {
         code: 'Act',
         section: match[2] || match[1], // Use acronym if present, otherwise full name
         act_name: match[1], // Store full act name
-        acronym: match[2] || null,
+        acronym: match[2] || '',
       },
     })
   }
