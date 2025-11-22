@@ -12,7 +12,7 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
     const citationChecks = await prisma.citationCheck.findMany({
       where: {
         jsonData: {
-          not: null,
+          not: null as any,
         },
       },
     })
@@ -44,6 +44,8 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
         escalated: 0,
         analyzed: 0,
         escalationRate: 0,
+        tier3WithUnanimousTier2: 0,
+        tier3WithUnanimousTier2Rate: 0,
         verdicts: {
           VERIFIED_REAL: 0,
           LIKELY_REAL: 0,
@@ -63,6 +65,18 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
           tier2: 0,
           tier3: 0,
         },
+      },
+      documentsThroughAllThree: {
+        documentRuns: 0,
+        totalCitations: 0,
+        invalidCitations: 0,
+        invalidPercentage: 0,
+        tier2Unanimous5of5Count: 0,
+        tier2Unanimous5of5Percentage: 0,
+        tier2Validated: 0,
+        tier3Runs: 0,
+        tier3Validated: 0,
+        tier2ValidVoteDistribution: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
       },
     }
 
@@ -105,6 +119,12 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
     let documentsWithAllThreeTiers = 0
     let citationsInCompleteDocuments = 0
     let invalidCitationsInCompleteDocuments = 0
+    let tier2Unanimous5of5InCompleteDocuments = 0
+    let tier2ValidatedInCompleteDocuments = 0
+    let tier3RunsInCompleteDocuments = 0
+    let tier3ValidatedInCompleteDocuments = 0
+    // Track VALID vote distribution in completed documents
+    const validVoteDistributionInComplete: Record<0 | 1 | 2 | 3 | 4 | 5, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
 
     // Process each citation check
     for (const check of citationChecks) {
@@ -122,6 +142,12 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
         let documentHasAllThreeTiers = true
         let documentInvalidCount = 0
         let documentTotalCitations = document.citations.length
+        let documentTier2Unanimous5of5Count = 0
+        let documentTier2ValidatedCount = 0
+        let documentTier3RunsCount = 0
+        let documentTier3ValidatedCount = 0
+        // Track distribution temporarily - only add if document completes
+        const documentDistribution: Record<0 | 1 | 2 | 3 | 4 | 5, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
 
         for (const citation of document.citations as Citation[]) {
           const hasTier1 = citation.tier_1 !== null && citation.tier_1 !== undefined
@@ -146,6 +172,39 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
             )) {
               documentInvalidCount++
             }
+
+            // Count Tier 2 validated citations - citations where consensus recommendation is CITATION_LIKELY_VALID
+            if (hasTier2 && citation.validation && citation.validation.consensus) {
+              if (citation.validation.consensus.recommendation === 'CITATION_LIKELY_VALID') {
+                documentTier2ValidatedCount++
+              }
+            }
+
+            // Count Tier 3 runs (escalations) - citations that were escalated to Tier 3
+            if (tier3Triggered) {
+              documentTier3RunsCount++
+            }
+
+            // Count Tier 3 validated citations - citations where Tier 3 verdict is VERIFIED_REAL or LIKELY_REAL
+            if (hasTier3 && citation.tier_3) {
+              if (citation.tier_3.verdict === 'VERIFIED_REAL' || citation.tier_3.verdict === 'LIKELY_REAL') {
+                documentTier3ValidatedCount++
+              }
+            }
+
+            // Count Tier 2 citations with 5/5 VALID votes in completed documents
+            // Only count if citation actually has Tier 2 validation data
+            if (hasTier2 && citation.validation && citation.validation.panel_evaluation) {
+              const validCount = citation.validation.panel_evaluation.filter(e => e.verdict === 'VALID').length
+              // Track distribution temporarily (only add if document completes)
+              if (citation.validation.panel_evaluation.length === 5 && validCount >= 0 && validCount <= 5) {
+                documentDistribution[validCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              }
+              // Only count if exactly 5 agents voted VALID
+              if (validCount === 5 && citation.validation.panel_evaluation.length === 5) {
+                documentTier2Unanimous5of5Count++
+              }
+            }
           }
         }
 
@@ -154,6 +213,14 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
           documentsWithAllThreeTiers++
           citationsInCompleteDocuments += documentTotalCitations
           invalidCitationsInCompleteDocuments += documentInvalidCount
+          tier2Unanimous5of5InCompleteDocuments += documentTier2Unanimous5of5Count
+          tier2ValidatedInCompleteDocuments += documentTier2ValidatedCount
+          tier3RunsInCompleteDocuments += documentTier3RunsCount
+          tier3ValidatedInCompleteDocuments += documentTier3ValidatedCount
+          // Add distribution to global count only if document completed
+          for (let i = 0; i <= 5; i++) {
+            validVoteDistributionInComplete[i as 0 | 1 | 2 | 3 | 4 | 5] += documentDistribution[i as 0 | 1 | 2 | 3 | 4 | 5]
+          }
         }
 
         for (const citation of document.citations as Citation[]) {
@@ -261,6 +328,14 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
           if (hasTier3 && citation.tier_3) {
             stats.tier3Validation.analyzed++
             
+            // Check if this Tier 3 citation had unanimous 5/5 VALID votes in Tier 2
+            if (hasTier2 && citation.validation) {
+              const validCount = citation.validation.panel_evaluation?.filter(e => e.verdict === 'VALID').length || 0
+              if (validCount === 5) {
+                stats.tier3Validation.tier3WithUnanimousTier2++
+              }
+            }
+            
             // Track Tier 3 verdicts
             const verdict = citation.tier_3.verdict
             if (verdict && stats.tier3Validation.verdicts[verdict] !== undefined) {
@@ -295,6 +370,11 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
       stats.tier3Validation.escalationRate = (stats.tier3Validation.escalated / citationsWithTier2) * 100
     }
 
+    // Calculate Tier 3 with unanimous Tier 2 rate
+    if (stats.tier3Validation.analyzed > 0) {
+      stats.tier3Validation.tier3WithUnanimousTier2Rate = (stats.tier3Validation.tier3WithUnanimousTier2 / stats.tier3Validation.analyzed) * 100
+    }
+
     // Calculate efficiency metrics
     if (citationsWithTier2 > 0) {
       stats.efficiency.unanimousRate = (stats.efficiency.unanimousDecisions / citationsWithTier2) * 100
@@ -313,16 +393,35 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
     const invalidPercentage = citationsInCompleteDocuments > 0 
       ? (invalidCitationsInCompleteDocuments / citationsInCompleteDocuments) * 100 
       : 0
+    
+    const tier2Unanimous5of5Percentage = citationsInCompleteDocuments > 0
+      ? (tier2Unanimous5of5InCompleteDocuments / citationsInCompleteDocuments) * 100
+      : 0
 
-    return {
-      ...stats,
-      documentsThroughAllThree: {
-        documentRuns: documentsWithAllThreeTiers,
-        totalCitations: citationsInCompleteDocuments,
-        invalidCitations: invalidCitationsInCompleteDocuments,
-        invalidPercentage: invalidPercentage,
-      },
+    // Verify the math: distribution should sum to total citations
+    const distributionSum = Object.values(validVoteDistributionInComplete).reduce((a, b) => a + b, 0)
+    if (distributionSum !== citationsInCompleteDocuments) {
+      console.warn(`[Analysis] Distribution sum (${distributionSum}) doesn't match total citations (${citationsInCompleteDocuments})`)
     }
+    if (validVoteDistributionInComplete[5] !== tier2Unanimous5of5InCompleteDocuments) {
+      console.warn(`[Analysis] Distribution 5/5 count (${validVoteDistributionInComplete[5]}) doesn't match tracked count (${tier2Unanimous5of5InCompleteDocuments})`)
+    }
+
+    // Update documentsThroughAllThree with calculated values
+    stats.documentsThroughAllThree = {
+      documentRuns: documentsWithAllThreeTiers,
+      totalCitations: citationsInCompleteDocuments,
+      invalidCitations: invalidCitationsInCompleteDocuments,
+      invalidPercentage: invalidPercentage,
+      tier2Unanimous5of5Count: tier2Unanimous5of5InCompleteDocuments,
+      tier2Unanimous5of5Percentage: tier2Unanimous5of5Percentage,
+      tier2Validated: tier2ValidatedInCompleteDocuments,
+      tier3Runs: tier3RunsInCompleteDocuments,
+      tier3Validated: tier3ValidatedInCompleteDocuments,
+      tier2ValidVoteDistribution: validVoteDistributionInComplete,
+    }
+
+    return stats
   } catch (error) {
     console.error('Error generating analysis data:', error)
     return null
@@ -446,7 +545,7 @@ export default async function AnalysisPage() {
             <p className="text-gray-600 mb-6">
               Statistics for documents where all citations have completed Tier 1, Tier 2, and Tier 3 validation
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
               <StatCard
                 title="Document Runs"
                 value={stats.documentsThroughAllThree.documentRuns}
@@ -454,23 +553,57 @@ export default async function AnalysisPage() {
                 color="text-blue-600"
               />
               <StatCard
-                title="Total Citations"
+                title="Total Citations Checked"
                 value={stats.documentsThroughAllThree.totalCitations}
-                subtitle="In fully processed documents"
+                subtitle="Citations in completed documents"
               />
               <StatCard
-                title="Invalid Citations"
-                value={stats.documentsThroughAllThree.invalidCitations}
-                subtitle="LIKELY_FABRICATED or NEEDS_HUMAN_REVIEW"
-                color="text-red-600"
+                title="Validated at Tier 2"
+                value={stats.documentsThroughAllThree.tier2Validated || 0}
+                subtitle={stats.documentsThroughAllThree.totalCitations > 0 
+                  ? `${((stats.documentsThroughAllThree.tier2Validated || 0) / stats.documentsThroughAllThree.totalCitations * 100).toFixed(1)}% of citations`
+                  : "Citations with VALID determination"}
+                color="text-blue-600"
               />
               <StatCard
-                title="Invalid Percentage"
-                value={`${stats.documentsThroughAllThree.invalidPercentage.toFixed(1)}%`}
-                subtitle="Of citations in complete documents"
-                color="text-red-600"
+                title="Tier 3 Runs"
+                value={stats.documentsThroughAllThree.tier3Runs || 0}
+                subtitle={stats.documentsThroughAllThree.totalCitations > 0
+                  ? `${((stats.documentsThroughAllThree.tier3Runs || 0) / stats.documentsThroughAllThree.totalCitations * 100).toFixed(1)}% of citations`
+                  : "Citations escalated to Tier 3"}
+                color="text-orange-600"
+              />
+              <StatCard
+                title="Validated at Tier 3"
+                value={stats.documentsThroughAllThree.tier3Validated || 0}
+                subtitle={stats.documentsThroughAllThree.tier3Runs > 0
+                  ? `${((stats.documentsThroughAllThree.tier3Validated || 0) / stats.documentsThroughAllThree.tier3Runs * 100).toFixed(1)}% of Tier 3 runs`
+                  : "Citations with VALID verdict"}
+                color="text-purple-600"
               />
             </div>
+            
+            {/* Tier 2 VALID Vote Distribution for Completed Documents Only */}
+            {stats.documentsThroughAllThree.tier2ValidVoteDistribution && (
+              <div className="mt-6 pt-6 border-t border-gray-300">
+                <h3 className="text-lg font-medium text-black mb-3">Tier 2 VALID Vote Distribution (Completed Documents Only)</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  {[0, 1, 2, 3, 4, 5].map((count) => {
+                    const value = stats.documentsThroughAllThree.tier2ValidVoteDistribution[count as 0 | 1 | 2 | 3 | 4 | 5] || 0
+                    const percentage = stats.documentsThroughAllThree.totalCitations > 0 
+                      ? (value / stats.documentsThroughAllThree.totalCitations) * 100 
+                      : 0
+                    return (
+                      <div key={count} className="bg-white rounded p-3 border border-gray-200">
+                        <div className="text-sm text-gray-600 mb-1">{count} VALID</div>
+                        <div className="text-xl font-semibold text-black">{value}</div>
+                        <div className="text-xs text-gray-500">{percentage.toFixed(1)}%</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Tier 2 Voting Distribution */}
@@ -496,25 +629,65 @@ export default async function AnalysisPage() {
           <div className="border border-gray-200 rounded-lg p-6 mb-8">
             <h2 className="text-xl font-semibold text-black mb-4">Agreement Levels</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-gray-50 rounded p-4">
-                <div className="text-sm text-gray-600 mb-1">Unanimous</div>
-                <div className="text-2xl font-semibold text-green-600">{stats.tier2Voting.agreementLevels.unanimous}</div>
-              </div>
-              <div className="bg-gray-50 rounded p-4">
-                <div className="text-sm text-gray-600 mb-1">Strong (4/5)</div>
-                <div className="text-2xl font-semibold text-blue-600">{stats.tier2Voting.agreementLevels.strong}</div>
-              </div>
-              <div className="bg-gray-50 rounded p-4">
-                <div className="text-sm text-gray-600 mb-1">Split</div>
-                <div className="text-2xl font-semibold text-orange-600">{stats.tier2Voting.agreementLevels.split}</div>
-              </div>
+              {(() => {
+                const totalAgreementLevels = stats.tier2Voting.agreementLevels.unanimous + 
+                  stats.tier2Voting.agreementLevels.strong + 
+                  stats.tier2Voting.agreementLevels.split
+                const unanimousPercentage = totalAgreementLevels > 0 
+                  ? (stats.tier2Voting.agreementLevels.unanimous / totalAgreementLevels) * 100 
+                  : 0
+                const strongPercentage = totalAgreementLevels > 0 
+                  ? (stats.tier2Voting.agreementLevels.strong / totalAgreementLevels) * 100 
+                  : 0
+                const splitPercentage = totalAgreementLevels > 0 
+                  ? (stats.tier2Voting.agreementLevels.split / totalAgreementLevels) * 100 
+                  : 0
+                
+                return (
+                  <>
+                    <div className="bg-gray-50 rounded p-4">
+                      <div className="text-sm text-gray-600 mb-1">Unanimous</div>
+                      <div className="text-2xl font-semibold text-green-600">
+                        {stats.tier2Voting.agreementLevels.unanimous}
+                        {totalAgreementLevels > 0 && (
+                          <span className="text-base font-normal text-gray-600 ml-2">
+                            ({unanimousPercentage.toFixed(1)}%)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded p-4">
+                      <div className="text-sm text-gray-600 mb-1">Strong (4/5)</div>
+                      <div className="text-2xl font-semibold text-blue-600">
+                        {stats.tier2Voting.agreementLevels.strong}
+                        {totalAgreementLevels > 0 && (
+                          <span className="text-base font-normal text-gray-600 ml-2">
+                            ({strongPercentage.toFixed(1)}%)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-gray-50 rounded p-4">
+                      <div className="text-sm text-gray-600 mb-1">Split</div>
+                      <div className="text-2xl font-semibold text-orange-600">
+                        {stats.tier2Voting.agreementLevels.split}
+                        {totalAgreementLevels > 0 && (
+                          <span className="text-base font-normal text-gray-600 ml-2">
+                            ({splitPercentage.toFixed(1)}%)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           </div>
 
           {/* Tier 3 Validation */}
           <div className="border border-gray-200 rounded-lg p-6 mb-8">
             <h2 className="text-xl font-semibold text-black mb-4">Tier 3 Validation</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
               <StatCard
                 title="Escalated"
                 value={stats.tier3Validation.escalated}

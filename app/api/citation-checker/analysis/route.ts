@@ -48,6 +48,8 @@ export async function GET(request: NextRequest) {
         escalated: 0,
         analyzed: 0,
         escalationRate: 0,
+        tier3WithUnanimousTier2: 0,
+        tier3WithUnanimousTier2Rate: 0,
         verdicts: {
           VERIFIED_REAL: 0,
           LIKELY_REAL: 0,
@@ -109,6 +111,12 @@ export async function GET(request: NextRequest) {
     let documentsWithAllThreeTiers = 0
     let citationsInCompleteDocuments = 0
     let invalidCitationsInCompleteDocuments = 0
+    let tier2Unanimous5of5InCompleteDocuments = 0
+    let tier2ValidatedInCompleteDocuments = 0
+    let tier3RunsInCompleteDocuments = 0
+    let tier3ValidatedInCompleteDocuments = 0
+    // Track VALID vote distribution in completed documents
+    const validVoteDistributionInComplete: Record<0 | 1 | 2 | 3 | 4 | 5, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
 
     // Process each citation check
     for (const check of citationChecks) {
@@ -126,6 +134,12 @@ export async function GET(request: NextRequest) {
         let documentHasAllThreeTiers = true
         let documentInvalidCount = 0
         let documentTotalCitations = document.citations.length
+        let documentTier2Unanimous5of5Count = 0
+        let documentTier2ValidatedCount = 0
+        let documentTier3RunsCount = 0
+        let documentTier3ValidatedCount = 0
+        // Track distribution temporarily - only add if document completes
+        const documentDistribution: Record<0 | 1 | 2 | 3 | 4 | 5, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
 
         for (const citation of document.citations as Citation[]) {
           const hasTier1 = citation.tier_1 !== null && citation.tier_1 !== undefined
@@ -150,6 +164,39 @@ export async function GET(request: NextRequest) {
             )) {
               documentInvalidCount++
             }
+
+            // Count Tier 2 validated citations - citations where consensus recommendation is CITATION_LIKELY_VALID
+            if (hasTier2 && citation.validation && citation.validation.consensus) {
+              if (citation.validation.consensus.recommendation === 'CITATION_LIKELY_VALID') {
+                documentTier2ValidatedCount++
+              }
+            }
+
+            // Count Tier 3 runs (escalations) - citations that were escalated to Tier 3
+            if (tier3Triggered) {
+              documentTier3RunsCount++
+            }
+
+            // Count Tier 3 validated citations - citations where Tier 3 verdict is VERIFIED_REAL or LIKELY_REAL
+            if (hasTier3 && citation.tier_3) {
+              if (citation.tier_3.verdict === 'VERIFIED_REAL' || citation.tier_3.verdict === 'LIKELY_REAL') {
+                documentTier3ValidatedCount++
+              }
+            }
+
+            // Count Tier 2 citations with 5/5 VALID votes in completed documents
+            // Only count if citation actually has Tier 2 validation data
+            if (hasTier2 && citation.validation && citation.validation.panel_evaluation) {
+              const validCount = citation.validation.panel_evaluation.filter(e => e.verdict === 'VALID').length
+              // Track distribution temporarily (only add if document completes)
+              if (citation.validation.panel_evaluation.length === 5 && validCount >= 0 && validCount <= 5) {
+                documentDistribution[validCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              }
+              // Only count if exactly 5 agents voted VALID
+              if (validCount === 5 && citation.validation.panel_evaluation.length === 5) {
+                documentTier2Unanimous5of5Count++
+              }
+            }
           }
         }
 
@@ -158,6 +205,14 @@ export async function GET(request: NextRequest) {
           documentsWithAllThreeTiers++
           citationsInCompleteDocuments += documentTotalCitations
           invalidCitationsInCompleteDocuments += documentInvalidCount
+          tier2Unanimous5of5InCompleteDocuments += documentTier2Unanimous5of5Count
+          tier2ValidatedInCompleteDocuments += documentTier2ValidatedCount
+          tier3RunsInCompleteDocuments += documentTier3RunsCount
+          tier3ValidatedInCompleteDocuments += documentTier3ValidatedCount
+          // Add distribution to global count only if document completed
+          for (let i = 0; i <= 5; i++) {
+            validVoteDistributionInComplete[i as 0 | 1 | 2 | 3 | 4 | 5] += documentDistribution[i as 0 | 1 | 2 | 3 | 4 | 5]
+          }
         }
 
         for (const citation of document.citations as Citation[]) {
@@ -265,6 +320,14 @@ export async function GET(request: NextRequest) {
           if (hasTier3 && citation.tier_3) {
             stats.tier3Validation.analyzed++
             
+            // Check if this Tier 3 citation had unanimous 5/5 VALID votes in Tier 2
+            if (hasTier2 && citation.validation) {
+              const validCount = citation.validation.panel_evaluation?.filter(e => e.verdict === 'VALID').length || 0
+              if (validCount === 5) {
+                stats.tier3Validation.tier3WithUnanimousTier2++
+              }
+            }
+            
             // Track Tier 3 verdicts
             const verdict = citation.tier_3.verdict
             if (verdict && stats.tier3Validation.verdicts[verdict] !== undefined) {
@@ -299,6 +362,11 @@ export async function GET(request: NextRequest) {
       stats.tier3Validation.escalationRate = (stats.tier3Validation.escalated / citationsWithTier2) * 100
     }
 
+    // Calculate Tier 3 with unanimous Tier 2 rate
+    if (stats.tier3Validation.analyzed > 0) {
+      stats.tier3Validation.tier3WithUnanimousTier2Rate = (stats.tier3Validation.tier3WithUnanimousTier2 / stats.tier3Validation.analyzed) * 100
+    }
+
     // Calculate efficiency metrics
     if (citationsWithTier2 > 0) {
       stats.efficiency.unanimousRate = (stats.efficiency.unanimousDecisions / citationsWithTier2) * 100
@@ -317,6 +385,19 @@ export async function GET(request: NextRequest) {
     const invalidPercentage = citationsInCompleteDocuments > 0 
       ? (invalidCitationsInCompleteDocuments / citationsInCompleteDocuments) * 100 
       : 0
+    
+    const tier2Unanimous5of5Percentage = citationsInCompleteDocuments > 0
+      ? (tier2Unanimous5of5InCompleteDocuments / citationsInCompleteDocuments) * 100
+      : 0
+
+    // Verify the math: distribution should sum to total citations
+    const distributionSum = Object.values(validVoteDistributionInComplete).reduce((a, b) => a + b, 0)
+    if (distributionSum !== citationsInCompleteDocuments) {
+      console.warn(`[Analysis API] Distribution sum (${distributionSum}) doesn't match total citations (${citationsInCompleteDocuments})`)
+    }
+    if (validVoteDistributionInComplete[5] !== tier2Unanimous5of5InCompleteDocuments) {
+      console.warn(`[Analysis API] Distribution 5/5 count (${validVoteDistributionInComplete[5]}) doesn't match tracked count (${tier2Unanimous5of5InCompleteDocuments})`)
+    }
 
     const response = {
       ...stats,
@@ -325,6 +406,12 @@ export async function GET(request: NextRequest) {
         totalCitations: citationsInCompleteDocuments,
         invalidCitations: invalidCitationsInCompleteDocuments,
         invalidPercentage: invalidPercentage,
+        tier2Unanimous5of5Count: tier2Unanimous5of5InCompleteDocuments,
+        tier2Unanimous5of5Percentage: tier2Unanimous5of5Percentage,
+        tier2Validated: tier2ValidatedInCompleteDocuments,
+        tier3Runs: tier3RunsInCompleteDocuments,
+        tier3Validated: tier3ValidatedInCompleteDocuments,
+        tier2ValidVoteDistribution: validVoteDistributionInComplete,
       },
     }
 

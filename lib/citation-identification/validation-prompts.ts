@@ -52,13 +52,15 @@ Analyze publication plausibility:
 - Is the reporter itself real and in use during this year?
 - Do the volume/page numbers represent realistic ranges (not too large, not nonsensical)?
 
-You are assessing whether this COULD plausibly be a real publication, not whether 
-you can verify the specific case exists.
+Your Task:
+Using everything you know about law, courts, reporters, statutes, case law, and 
+legal practices, investigate this citation thoroughly. Your goal is to determine 
+with high confidence whether this citation is real or fabricated.
 
 Respond with EXACTLY one of:
-- VALID: Court/reporter/year alignment is plausible
-- INVALID [reason_code]: Court/reporter/year alignment is implausible
-- UNCERTAIN [reason_code]: Alignment could be real but has some unusual aspects
+- VALID: Citation is likely real
+- INVALID [reason_code]: Citation is likely fabricated
+- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
 
 If INVALID, you MUST use one of these exact reason codes:
 - reporter_court_mismatch
@@ -111,10 +113,15 @@ Analyze case ecology:
 For context: Real cases often have boring names (Smith v. Jones), but the overall 
 pattern should feel like real litigation not invented examples.
 
+Your Task:
+Using everything you know about law, courts, reporters, statutes, case law, and 
+legal practices, investigate this citation thoroughly. Your goal is to determine 
+with high confidence whether this citation is real or fabricated.
+
 Respond with EXACTLY one of:
-- VALID: Party names and characteristics fit real litigation patterns
-- INVALID [reason_code]: Party names or characteristics seem fabricated
-- UNCERTAIN [reason_code]: Some aspects unusual but could be real
+- VALID: Citation is likely real
+- INVALID [reason_code]: Citation is likely fabricated
+- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
 
 If INVALID, you MUST use one of these exact reason codes:
 - party_names_artificial
@@ -165,13 +172,15 @@ Analyze temporal plausibility:
 - Does the citation's age make sense for how it's used in the document?
 - If it's a statute, would it have existed in this form at this time?
 
-You're checking whether the citation fits the legal and historical timeline, 
-not verifying the specific case exists.
+Your Task:
+Using everything you know about law, courts, reporters, statutes, case law, and 
+legal practices, investigate this citation thoroughly. Your goal is to determine 
+with high confidence whether this citation is real or fabricated.
 
 Respond with EXACTLY one of:
-- VALID: Citation timing is historically and legally plausible
-- INVALID [reason_code]: Citation timing is impossible or implausible
-- UNCERTAIN [reason_code]: Timeline has some unusual aspects but could be real
+- VALID: Citation is likely real
+- INVALID [reason_code]: Citation is likely fabricated
+- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
 
 If INVALID, you MUST use one of these exact reason codes:
 - temporal_impossibility
@@ -213,13 +222,15 @@ Drawing on your knowledge of:
 Make a holistic assessment: Does this citation feel real based on your knowledge 
 of the legal landscape, or does it have the marks of an AI fabrication?
 
-You don't need to verify the specific case exists. Rather, assess based on the 
-overall plausibility given your legal knowledge.
+Your Task:
+Using everything you know about law, courts, reporters, statutes, case law, and 
+legal practices, investigate this citation thoroughly. Your goal is to determine 
+with high confidence whether this citation is real or fabricated.
 
 Respond with EXACTLY one of:
-- VALID: Citation appears consistent with real legal authority
-- INVALID [reason_code]: Citation appears fabricated or inconsistent with legal knowledge
-- UNCERTAIN [reason_code]: Citation could be real but has some inconsistencies
+- VALID: Citation is likely real
+- INVALID [reason_code]: Citation is likely fabricated
+- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
 
 If INVALID, you MUST use one of these exact reason codes:
 - inconsistent_with_knowledge

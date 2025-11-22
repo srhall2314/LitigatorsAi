@@ -189,6 +189,8 @@ export interface AnalysisStatistics {
     escalated: number;
     analyzed: number;
     escalationRate: number;
+    tier3WithUnanimousTier2: number;
+    tier3WithUnanimousTier2Rate: number;
     verdicts: Record<Tier3Verdict, number>;
   };
   agentAgreement: {
@@ -213,6 +215,12 @@ export interface AnalysisStatistics {
     totalCitations: number;
     invalidCitations: number;
     invalidPercentage: number;
+    tier2Unanimous5of5Count: number;
+    tier2Unanimous5of5Percentage: number;
+    tier2Validated: number;
+    tier3Runs: number;
+    tier3Validated: number;
+    tier2ValidVoteDistribution: Record<0 | 1 | 2 | 3 | 4 | 5, number>;
   };
 }
 
