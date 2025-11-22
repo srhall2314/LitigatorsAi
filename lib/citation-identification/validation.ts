@@ -4,6 +4,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import retry from 'async-retry'
 import { Citation, CitationDocument, AgentVerdict, Consensus, CitationValidation, AgreementLevel, CitationRecommendationType, Tier3Result } from '@/types/citation-json'
 import {
   getCitationAuthorityValidatorPrompt,
@@ -43,8 +44,60 @@ const AGENT_CONFIGS = [
 const MODEL = 'claude-haiku-4-5-20251001' // Claude Haiku 4.5 for Tier 2 (fast and cost-efficient)
 const TIER3_MODEL = 'claude-sonnet-4-5-20250929' // Claude Sonnet 4.5 for Tier 3 (most capable model)
 
+// Retry configuration
+const RETRY_CONFIG = {
+  retries: 3,
+  minTimeout: 1000, // 1 second
+  maxTimeout: 10000, // 10 seconds
+  factor: 2, // Exponential backoff: 1s, 2s, 4s
+  randomize: true, // Add jitter to prevent thundering herd
+}
+
 /**
- * Call a single validation agent
+ * Determine if an error is retryable
+ * Retry on: rate limits, timeouts, network errors, server errors (5xx)
+ * Don't retry on: authentication errors (401), bad requests (400), not found (404)
+ */
+function isRetryableError(error: any): boolean {
+  // Check for Anthropic API error structure
+  if (error?.status) {
+    const status = error.status
+    // Retry on rate limits (429) and server errors (5xx)
+    if (status === 429 || (status >= 500 && status < 600)) {
+      return true
+    }
+    // Don't retry on client errors (4xx) except rate limits
+    if (status >= 400 && status < 500) {
+      return false
+    }
+  }
+  
+  // Check for network/timeout errors
+  if (error?.code) {
+    const code = error.code.toLowerCase()
+    // Retry on network errors
+    if (code === 'econnreset' || code === 'etimedout' || code === 'econnrefused' || 
+        code === 'enotfound' || code === 'timeout' || code === 'network_error') {
+      return true
+    }
+  }
+  
+  // Check error message for common retryable patterns
+  const message = error?.message?.toLowerCase() || ''
+  if (message.includes('rate limit') || 
+      message.includes('timeout') || 
+      message.includes('network') ||
+      message.includes('server error') ||
+      message.includes('temporary')) {
+    return true
+  }
+  
+  // Default: retry on unknown errors (could be transient)
+  return true
+}
+
+/**
+ * Call a single validation agent with retry logic
  */
 async function callValidationAgent(
   agentConfig: typeof AGENT_CONFIGS[number],
@@ -53,20 +106,42 @@ async function callValidationAgent(
   apiKey: string
 ): Promise<AgentVerdict> {
   const anthropic = new Anthropic({ apiKey })
-  
   const prompt = agentConfig.getPrompt(citation, context)
   
   try {
-    const message = await anthropic.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
+    const message = await retry(
+      async (bail: (error: Error) => void): Promise<Anthropic.Messages.Message> => {
+        try {
+          return await anthropic.messages.create({
+            model: MODEL,
+            max_tokens: 1024,
+            messages: [
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+          })
+        } catch (error: any) {
+          // If error is not retryable, bail out immediately
+          if (!isRetryableError(error)) {
+            bail(error instanceof Error ? error : new Error(String(error)))
+            throw error // This will never execute but satisfies TypeScript
+          }
+          // Otherwise, throw to trigger retry
+          throw error
+        }
+      },
+      {
+        ...RETRY_CONFIG,
+        onRetry: (error: Error, attempt: number) => {
+          console.warn(
+            `[Validation] Retrying agent ${agentConfig.name} (attempt ${attempt}/${RETRY_CONFIG.retries + 1}):`,
+            error instanceof Error ? error.message : String(error)
+          )
         },
-      ],
-    })
+      }
+    )
     
     // Extract text from response
     const responseText = message.content
@@ -94,9 +169,9 @@ async function callValidationAgent(
     
     return verdict
   } catch (error) {
-    console.error(`[Validation] Error calling agent ${agentConfig.name}:`, error)
+    console.error(`[Validation] Error calling agent ${agentConfig.name} after retries:`, error)
     
-    // Return UNCERTAIN verdict on error
+    // Return UNCERTAIN verdict on error after retries exhausted
     return {
       agent: agentConfig.name,
       verdict: 'UNCERTAIN',
@@ -211,7 +286,7 @@ export async function validateCitationWithPanel(
 }
 
 /**
- * Perform Tier 3 investigation for a citation
+ * Perform Tier 3 investigation for a citation with retry logic
  */
 export async function validateCitationTier3(
   citation: Citation,
@@ -220,20 +295,42 @@ export async function validateCitationTier3(
   apiKey: string
 ): Promise<Tier3Result> {
   const anthropic = new Anthropic({ apiKey })
-  
   const prompt = getTier3InvestigationPrompt(citation, context, tier2Results)
   
   try {
-    const message = await anthropic.messages.create({
-      model: TIER3_MODEL,
-      max_tokens: 2048,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
+    const message = await retry(
+      async (bail: (error: Error) => void): Promise<Anthropic.Messages.Message> => {
+        try {
+          return await anthropic.messages.create({
+            model: TIER3_MODEL,
+            max_tokens: 2048,
+            messages: [
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+          })
+        } catch (error: any) {
+          // If error is not retryable, bail out immediately
+          if (!isRetryableError(error)) {
+            bail(error instanceof Error ? error : new Error(String(error)))
+            throw error // This will never execute but satisfies TypeScript
+          }
+          // Otherwise, throw to trigger retry
+          throw error
+        }
+      },
+      {
+        ...RETRY_CONFIG,
+        onRetry: (error: Error, attempt: number) => {
+          console.warn(
+            `[Tier3] Retrying citation ${citation.id} investigation (attempt ${attempt}/${RETRY_CONFIG.retries + 1}):`,
+            error instanceof Error ? error.message : String(error)
+          )
         },
-      ],
-    })
+      }
+    )
     
     // Extract text from response
     const responseText = message.content
@@ -260,13 +357,13 @@ export async function validateCitationTier3(
     
     return result
   } catch (error) {
-    console.error(`[Tier3] Error investigating citation ${citation.id}:`, error)
+    console.error(`[Tier3] Error investigating citation ${citation.id} after retries:`, error)
     if (error instanceof Error) {
       console.error(`[Tier3] Error message: ${error.message}`)
       console.error(`[Tier3] Error stack: ${error.stack}`)
     }
     
-    // Return uncertain result on error
+    // Return uncertain result on error after retries exhausted
     return {
       verdict: 'NEEDS_HUMAN_REVIEW',
       reasoning: `Error occurred during Tier 3 investigation: ${error instanceof Error ? error.message : String(error)}`,

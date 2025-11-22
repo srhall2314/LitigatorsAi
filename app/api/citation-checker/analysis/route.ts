@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const citationChecks = await prisma.citationCheck.findMany({
       where: {
         jsonData: {
-          not: null,
+          not: null as any,
         },
       },
     })
@@ -69,6 +69,18 @@ export async function GET(request: NextRequest) {
           tier2: 0,
           tier3: 0,
         },
+      },
+      documentsThroughAllThree: {
+        documentRuns: 0,
+        totalCitations: 0,
+        invalidCitations: 0,
+        invalidPercentage: 0,
+        tier2Unanimous5of5Count: 0,
+        tier2Unanimous5of5Percentage: 0,
+        tier2Validated: 0,
+        tier3Runs: 0,
+        tier3Validated: 0,
+        tier2ValidVoteDistribution: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
       },
     }
 
