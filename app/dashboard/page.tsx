@@ -81,6 +81,21 @@ export default async function DashboardPage() {
 
             <div className="border border-gray-200 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-black mb-2">
+                Citation Analysis
+              </h2>
+              <p className="text-black mb-4">
+                View statistics and insights on citation validation
+              </p>
+              <a
+                href="/citation-checker/analysis"
+                className="text-black underline hover:no-underline inline-block"
+              >
+                View Analysis →
+              </a>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-black mb-2">
                 Quick Actions
               </h2>
               <ul className="space-y-2 text-black">

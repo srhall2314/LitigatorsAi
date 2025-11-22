@@ -162,3 +162,57 @@ export interface CitationDocument {
   };
 }
 
+// Analysis Statistics Types
+export interface AnalysisStatistics {
+  completion: {
+    total: number;
+    tier1Only: number;
+    tier1And2: number;
+    allThreeTiers: number;
+    completionRates: {
+      tier1: number;
+      tier2: number;
+      tier3: number;
+    };
+  };
+  tier2Voting: {
+    validVotes: Record<0 | 1 | 2 | 3 | 4 | 5, number>;
+    invalidVotes: Record<0 | 1 | 2 | 3 | 4 | 5, number>;
+    uncertainVotes: Record<0 | 1 | 2 | 3 | 4 | 5, number>;
+    agreementLevels: {
+      unanimous: number;
+      strong: number;
+      split: number;
+    };
+  };
+  tier3Validation: {
+    escalated: number;
+    analyzed: number;
+    escalationRate: number;
+    verdicts: Record<Tier3Verdict, number>;
+  };
+  agentAgreement: {
+    pairwiseMatrix: Record<string, Record<string, number>>;
+    agentStats: Record<string, {
+      valid: number;
+      invalid: number;
+      uncertain: number;
+    }>;
+  };
+  efficiency: {
+    unanimousDecisions: number;
+    unanimousRate: number;
+    escalationRate: number;
+    averageConfidence: {
+      tier2: number;
+      tier3: number;
+    };
+  };
+  documentsThroughAllThree: {
+    documentRuns: number;
+    totalCitations: number;
+    invalidCitations: number;
+    invalidPercentage: number;
+  };
+}
+
