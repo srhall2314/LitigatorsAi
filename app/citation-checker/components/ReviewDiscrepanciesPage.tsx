@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { ContextPanel } from "./ContextPanel"
-import { CitationValidation, ValidationVerdict } from "@/types/citation-json"
+import { CitationValidation, ValidationVerdict, Tier3FinalStatus } from "@/types/citation-json"
+import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 
 interface ReviewDiscrepanciesPageProps {
   fileId: string
