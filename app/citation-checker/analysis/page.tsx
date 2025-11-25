@@ -175,7 +175,8 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
             if (hasTier3 && citation.tier_3) {
               const tier3Status = getTier3FinalStatus(citation.tier_3)
               if (tier3Status === 'FAIL' || tier3Status === 'WARN') {
-              documentInvalidCount++
+                documentInvalidCount++
+              }
             }
 
             // Count Tier 2 validated citations - citations where consensus recommendation is CITATION_LIKELY_VALID
@@ -342,14 +343,25 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
               }
             }
             
-            // Track Tier 3 verdicts
-            const verdict = citation.tier_3.verdict
-            if (verdict && stats.tier3Validation.verdicts[verdict] !== undefined) {
-              stats.tier3Validation.verdicts[verdict]++
+            // Track Tier 3 verdicts (new format)
+            const tier3Status = getTier3FinalStatus(citation.tier_3)
+            if (tier3Status && stats.tier3Validation.verdicts[tier3Status] !== undefined) {
+              stats.tier3Validation.verdicts[tier3Status]++
+            }
+            
+            // Track legacy verdicts for backward compatibility
+            if (citation.tier_3.verdict && stats.tier3Validation.legacyVerdicts) {
+              const legacyVerdict = citation.tier_3.verdict as Tier3Verdict
+              if (stats.tier3Validation.legacyVerdicts[legacyVerdict] !== undefined) {
+                stats.tier3Validation.legacyVerdicts[legacyVerdict]++
+              }
             }
 
-            // Track Tier 3 confidence (convert to numeric for averaging)
-            if (citation.tier_3.confidence) {
+            // Track Tier 3 confidence (use consensus confidence_score if available, otherwise legacy confidence)
+            if (citation.tier_3.consensus?.confidence_score !== undefined) {
+              totalTier3Confidence += citation.tier_3.consensus.confidence_score
+              tier3ConfidenceCount++
+            } else if (citation.tier_3.confidence) {
               const confidenceMap: Record<string, number> = { high: 0.8, medium: 0.5, low: 0.2 }
               const numericConfidence = confidenceMap[citation.tier_3.confidence] || 0
               totalTier3Confidence += numericConfidence
