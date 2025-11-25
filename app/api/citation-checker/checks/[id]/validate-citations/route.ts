@@ -98,204 +98,48 @@ export async function POST(
   }
 }
 
-// Streaming endpoint for progress updates (GET with ?stream=true)
+// GET endpoint - check for existing job or return error
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { searchParams } = new URL(request.url)
-  const shouldStream = searchParams.get('stream') === 'true'
-  
-  if (!shouldStream) {
-    return NextResponse.json({ error: "Use POST for validation or GET with ?stream=true for progress" }, { status: 400 })
+  try {
+    const session = await getServerSession(authOptions)
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+    })
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
+    }
+
+    // Check if a validation job exists for this check
+    const job = await prisma.validationJob.findUnique({
+      where: { checkId: params.id },
+    })
+
+    if (job) {
+      return NextResponse.json({
+        jobId: job.id,
+        status: job.status,
+        message: "Use POST to create a new validation job, or check job status at /api/citation-checker/jobs/[jobId]",
+      })
+    }
+
+    return NextResponse.json({
+      message: "No validation job found. Use POST to create a validation job.",
+    })
+  } catch (error) {
+    console.error("Error in GET validation endpoint:", error)
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    )
   }
-  const encoder = new TextEncoder()
-  
-  // Create a readable stream
-  const stream = new ReadableStream({
-    async start(controller) {
-      let isClosed = false
-      
-      const sendProgress = (data: any) => {
-        if (isClosed) return
-        try {
-          const message = `data: ${JSON.stringify(data)}\n\n`
-          controller.enqueue(encoder.encode(message))
-        } catch (error) {
-          console.error("Error sending progress:", error)
-          isClosed = true
-        }
-      }
-      
-      const closeStream = () => {
-        if (!isClosed) {
-          isClosed = true
-          try {
-            controller.close()
-          } catch (error) {
-            // Stream may already be closed, ignore
-          }
-        }
-      }
-
-      try {
-        const session = await getServerSession(authOptions)
-        
-        if (!session?.user?.email) {
-          sendProgress({ type: "error", error: "Unauthorized" })
-          closeStream()
-          return
-        }
-
-        if (!ANTHROPIC_API_KEY) {
-          sendProgress({ type: "error", error: "Anthropic API key not configured" })
-          closeStream()
-          return
-        }
-
-        const user = await prisma.user.findUnique({
-          where: { email: session.user.email },
-        })
-
-        if (!user) {
-          sendProgress({ type: "error", error: "User not found" })
-          closeStream()
-          return
-        }
-
-        // Get the current CitationCheck
-        const currentCheck = await prisma.citationCheck.findUnique({
-          where: { id: params.id },
-        })
-
-        if (!currentCheck) {
-          sendProgress({ type: "error", error: "Citation check not found" })
-          closeStream()
-          return
-        }
-
-        if (!currentCheck.jsonData) {
-          sendProgress({ type: "error", error: "JSON data not found" })
-          closeStream()
-          return
-        }
-
-        const jsonData = currentCheck.jsonData as any
-        
-        if (!jsonData.document?.citations || jsonData.document.citations.length === 0) {
-          sendProgress({ type: "error", error: "No citations found" })
-          closeStream()
-          return
-        }
-
-        const totalCitations = jsonData.document.citations.length
-        let tier3Count = 0
-
-        // Get the latest version
-        const latestVersion = await prisma.citationCheck.findFirst({
-          where: { fileUploadId: currentCheck.fileUploadId },
-          orderBy: { version: "desc" },
-        })
-
-        const nextVersion = latestVersion ? latestVersion.version + 1 : 1
-
-        // Create new version
-        const newVersion = await prisma.citationCheck.create({
-          data: {
-            fileUploadId: currentCheck.fileUploadId,
-            userId: user.id,
-            version: nextVersion,
-            status: "citations_validated",
-            jsonData: jsonData as any,
-          },
-        })
-
-        sendProgress({ 
-          type: "start",
-          tier2Total: totalCitations,
-          tier3Total: 0 
-        })
-
-        // Validate all citations with progress updates
-        const updatedJsonData = await validateAllCitations(
-          jsonData,
-          ANTHROPIC_API_KEY,
-          (tier2Current, tier2Total, tier3Current, tier3Total) => {
-            // Always send progress updates
-            if (tier3Total > 0) {
-              // Tier 3 is in progress
-              const progressData = {
-                type: "tier3_progress",
-                tier2Current: tier2Total,
-                tier2Total: tier2Total,
-                tier3Current,
-                tier3Total,
-                tier3Percentage: Math.round((tier3Current / tier3Total) * 100)
-              }
-              console.log(`[Progress] Tier 3: ${tier3Current}/${tier3Total}`)
-              sendProgress(progressData)
-            } else {
-              // Still in Tier 2
-              const progressData = {
-                type: "tier2_progress",
-                tier2Current,
-                tier2Total,
-                tier2Percentage: Math.round((tier2Current / tier2Total) * 100)
-              }
-              console.log(`[Progress] Tier 2: ${tier2Current}/${tier2Total}`)
-              sendProgress(progressData)
-            }
-          }
-        )
-
-        // Count citations that actually got Tier 3 results
-        tier3Count = updatedJsonData.document.citations.filter(
-          c => c.tier_3 !== null && c.tier_3 !== undefined
-        ).length
-
-        sendProgress({
-          type: "tier2_complete",
-          tier3Count,
-          tier3Total: tier3Count
-        })
-
-        // Update version with validation results
-        const updated = await prisma.citationCheck.update({
-          where: { id: newVersion.id },
-          data: {
-            jsonData: updatedJsonData as any,
-            status: "citations_validated",
-          },
-        })
-
-        sendProgress({
-          type: "complete",
-          checkId: updated.id,
-          jsonData: updatedJsonData
-        })
-
-        closeStream()
-      } catch (error) {
-        console.error("Error in streaming validation:", error)
-        if (!isClosed) {
-          sendProgress({
-            type: "error",
-            error: error instanceof Error ? error.message : String(error)
-          })
-        }
-        closeStream()
-      }
-    },
-  })
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no', // Disable nginx buffering
-      'Transfer-Encoding': 'chunked',
-    },
-  })
 }
 
