@@ -52,28 +52,28 @@ export default async function PromptsPage() {
   // Generate Tier 2 prompts
   const tier2Prompts = [
     {
-      name: "Agent 1: Citation Authority Validator",
-      focus: "Court/reporter/year alignment and publication plausibility",
+      name: "Agent 1: Authority Specialist",
+      focus: "Reporter/court/volume/page/year plausibility - Detect structural publication impossibilities ONLY",
       prompt: getCitationAuthorityValidatorPrompt(exampleCitation, exampleContext)
     },
     {
-      name: "Agent 2: Case Ecology Validator",
-      focus: "Party names, case characteristics, and litigation plausibility",
+      name: "Agent 2: Ecology Specialist",
+      focus: "Party configuration & litigation plausibility - Evaluate whether the type of parties and type of case are realistic",
       prompt: getCaseEcologyValidatorPrompt(exampleCitation, exampleContext)
     },
     {
-      name: "Agent 3: Temporal Reality Validator",
-      focus: "Timeline consistency and historical plausibility",
+      name: "Agent 3: Temporal Specialist",
+      focus: "Timeline & historical plausibility - Detect temporal impossibilities ONLY",
       prompt: getTemporalRealityValidatorPrompt(exampleCitation, exampleContext)
     },
     {
-      name: "Agent 4: Legal Knowledge Validator",
-      focus: "Broad application of legal knowledge and awareness",
+      name: "Agent 4: Knowledge Generalist",
+      focus: "Broad doctrinal plausibility (NOT hallucination detection) - Check whether the authority makes basic legal sense",
       prompt: getLegalKnowledgeValidatorPrompt(exampleCitation, exampleContext)
     },
     {
-      name: "Agent 5: Reality Assessment Expert",
-      focus: "Synthesis and overall reality assessment",
+      name: "Agent 5: Reality Generalist",
+      focus: "High-level cross-dimensional contradiction check - Provide extremely light-touch anomaly sensing",
       prompt: getRealityAssessmentExpertPrompt(exampleCitation, exampleContext)
     }
   ]

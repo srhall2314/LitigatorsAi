@@ -255,11 +255,11 @@ export function CitationsReportPage({ fileId }: CitationsReportPageProps) {
 
   const getAgentDisplayName = (agentName: string) => {
     const names: Record<string, string> = {
-      'citation_authority_validator_v1': 'Agent: Citation Authority Validator',
-      'case_ecology_validator_v1': 'Agent: Case Ecology Validator',
-      'temporal_reality_validator_v1': 'Agent: Temporal Reality Validator',
-      'legal_knowledge_validator_v1': 'Agent: Legal Knowledge Validator',
-      'reality_assessment_expert_v1': 'Agent: Reality Assessment Expert',
+      'citation_authority_validator_v1': 'Agent: Authority Specialist',
+      'case_ecology_validator_v1': 'Agent: Ecology Specialist',
+      'temporal_reality_validator_v1': 'Agent: Temporal Specialist',
+      'legal_knowledge_validator_v1': 'Agent: Knowledge Generalist',
+      'reality_assessment_expert_v1': 'Agent: Reality Generalist',
     }
     return names[agentName] || `Agent: ${agentName}`
   }

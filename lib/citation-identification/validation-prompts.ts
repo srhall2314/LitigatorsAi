@@ -6,8 +6,9 @@
 import { Citation, CaseComponents, StatuteComponents, RegulationComponents, RuleComponents } from '@/types/citation-json'
 
 /**
- * Agent 1: Citation Authority Validator
- * Focus: Court/reporter/year alignment and publication plausibility
+ * Agent 1: Authority Specialist
+ * Focus: Reporter/court/volume/page/year plausibility
+ * Role: Detect structural publication impossibilities ONLY.
  */
 export function getCitationAuthorityValidatorPrompt(
   citation: Citation,
@@ -37,49 +38,51 @@ export function getCitationAuthorityValidatorPrompt(
     componentsText = 'See citation text for components'
   }
 
-  return `You are a legal citation authority validator. Assess whether this citation's 
-court, reporter, and publication details are plausible.
+  return `You are an authority validator. Your ONLY job is to evaluate whether the
+citation's metadata (court, reporter, volume, page, year) is plausible for
+real-world legal publications.
+
+You DO NOT evaluate doctrinal content, party names, argument fit,
+"too perfect" support, or whether the case feels real.
 
 Citation: ${citation.citationText}
 Citation Type: ${citation.citationType}
 Components:
 ${componentsText}
 
-Analyze publication plausibility:
-- Does this court's decisions get published in this reporter?
-- Are volume and page numbers reasonable for the reporter and year?
-- Would decisions from this court/year appear in this volume number?
-- Is the reporter itself real and in use during this year?
-- Do the volume/page numbers represent realistic ranges (not too large, not nonsensical)?
+Evaluate STRICTLY:
+- Does this court publish in this reporter?
+- Was this reporter active in this year?
+- Is the volume plausible for this reporter/year?
+- Is the page number within normal range?
+- Did this court exist during that time?
 
-Your Task:
-Using everything you know about law, courts, reporters, statutes, case law, and 
-legal practices, investigate this citation thoroughly. Your goal is to determine 
-with high confidence whether this citation is real or fabricated.
+If metadata is normal → VALID.
+Only clear structural impossibilities → INVALID.
+Anything unusual but not impossible → UNCERTAIN.
 
-Respond with EXACTLY one of:
-- VALID: Citation is likely real
-- INVALID [reason_code]: Citation is likely fabricated
-- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
+Respond EXACTLY with:
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
 
-If INVALID, you MUST use one of these exact reason codes:
+INVALID reason codes:
 - reporter_court_mismatch
 - volume_impossible
 - page_unreasonable
 - reporter_timing_wrong
 - year_implausible
 
-If UNCERTAIN, you MUST use one of these exact reason codes:
+UNCERTAIN reason codes:
 - unusual_volume_page
 - reporter_edge_case
-- timing_questionable
-
-Format your response as: "INVALID reporter_court_mismatch" or "UNCERTAIN unusual_volume_page" (use the exact code, no variations).`
+- timing_questionable`
 }
 
 /**
- * Agent 2: Case Ecology Validator
- * Focus: Party names, case characteristics, and litigation plausibility
+ * Agent 2: Ecology Specialist
+ * Focus: Party configuration & litigation plausibility
+ * Role: Evaluate whether the type of parties and type of case are realistic.
  */
 export function getCaseEcologyValidatorPrompt(
   citation: Citation,
@@ -94,52 +97,52 @@ export function getCaseEcologyValidatorPrompt(
     courtText = caseComponents.court || 'N/A'
   }
 
-  return `You are a case ecology validator. Assess whether the party names, case type, 
-and characteristics of this citation fit realistic litigation patterns.
+  return `You are a case ecology validator. You evaluate whether the party structure and
+case-type characteristics are realistic.
+
+You DO NOT:
+- Penalize generic or boring names (e.g., Smith v. Jones is extremely common)
+- Evaluate doctrinal content
+- Judge "too perfect fit"
+- Judge metadata or timeline
 
 Citation: ${citation.citationText}
 Citation Type: ${citation.citationType}
-Party Names: ${partiesText}
+Parties: ${partiesText}
 Court: ${courtText}
 Document Context: ${context}
 
-Analyze case ecology:
-- Do the party names sound like real entities (individuals, companies, government)?
-- Given the legal issue discussed, would you expect a case with these parties?
-- Is the case type (civil, criminal, administrative) plausible for the context?
-- Do the names match realistic litigation patterns?
-- Are names suspiciously generic, or do they match real naming conventions?
+Evaluate ONLY:
+- Do the parties resemble real individuals, companies, or government entities?
+- Does the party pairing make sense for the type of dispute?
+- Does the case type (civil/criminal/admin) match the party roles?
+- Are there entity-type mismatches (e.g., federal agency litigating a local eviction case)?
 
-For context: Real cases often have boring names (Smith v. Jones), but the overall 
-pattern should feel like real litigation not invented examples.
+If party configuration is normal → VALID.
+Generic names → VALID or UNCERTAIN (never INVALID).
+INVALID only for clear mismatches.
 
-Your Task:
-Using everything you know about law, courts, reporters, statutes, case law, and 
-legal practices, investigate this citation thoroughly. Your goal is to determine 
-with high confidence whether this citation is real or fabricated.
+Respond EXACTLY with:
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
 
-Respond with EXACTLY one of:
-- VALID: Citation is likely real
-- INVALID [reason_code]: Citation is likely fabricated
-- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
-
-If INVALID, you MUST use one of these exact reason codes:
-- party_names_artificial
+INVALID reason codes:
 - case_type_implausible
-- generic_pattern_suspicious
 - characteristics_mismatch
+- party_role_impossible
+- entity_type_impossible
 
-If UNCERTAIN, you MUST use one of these exact reason codes:
+UNCERTAIN reason codes:
 - names_generic_but_possible
 - unusual_pairing
-- characteristics_unclear
-
-Format your response as: "INVALID party_names_artificial" or "UNCERTAIN names_generic_but_possible" (use the exact code, no variations).`
+- characteristics_unclear`
 }
 
 /**
- * Agent 3: Temporal Reality Validator
- * Focus: Timeline consistency and historical plausibility
+ * Agent 3: Temporal Specialist
+ * Focus: Timeline & historical plausibility
+ * Role: Detect temporal impossibilities ONLY.
  */
 export function getTemporalRealityValidatorPrompt(
   citation: Citation,
@@ -155,150 +158,143 @@ export function getTemporalRealityValidatorPrompt(
     yearText = String(caseComponents.year || 'N/A')
   }
 
-  return `You are a temporal reality validator. Assess whether this citation's timeline 
-makes historical and legal sense.
+  return `You are a temporal validator. Your ONLY job is to evaluate whether the
+citation's year, court history, reporter sequence, and issue timing are
+historically plausible.
+
+You DO NOT evaluate:
+- Generic names
+- Argument fit
+- Party structure
+- Gestalt or pattern concerns
 
 Citation: ${citation.citationText}
 Citation Type: ${citation.citationType}
 Court: ${courtText}
 Year: ${yearText}
-Document Context: ${context}
+Context: ${context}
 
-Analyze temporal plausibility:
-- For the court/reporter, would cases have existed in this year?
-- Does the legal issue discussed have historical plausibility for this year?
-  (e.g., was data privacy a concern in 1980? Was the internet relevant?)
-- Would a lawyer in the modern era cite a decision from this year for this topic?
-- Does the citation's age make sense for how it's used in the document?
-- If it's a statute, would it have existed in this form at this time?
+Evaluate:
+- Did this court exist in this year?
+- Was this reporter active at the time?
+- Was the legal issue relevant during that period?
+- Is the age of the authority plausible for its cited use?
 
-Your Task:
-Using everything you know about law, courts, reporters, statutes, case law, and 
-legal practices, investigate this citation thoroughly. Your goal is to determine 
-with high confidence whether this citation is real or fabricated.
+If historically normal → VALID.
+INVALID only for clear anachronisms.
+Ambiguous timeline → UNCERTAIN.
 
-Respond with EXACTLY one of:
-- VALID: Citation is likely real
-- INVALID [reason_code]: Citation is likely fabricated
-- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
+Respond EXACTLY with:
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
 
-If INVALID, you MUST use one of these exact reason codes:
+INVALID reason codes:
 - temporal_impossibility
 - anachronistic_issue
 - historical_mismatch
 - future_dated
 
-If UNCERTAIN, you MUST use one of these exact reason codes:
+UNCERTAIN reason codes:
 - early_in_reporter_series
 - edge_of_legal_development
-- timing_unusual_but_possible
-
-Format your response as: "INVALID temporal_impossibility" or "UNCERTAIN early_in_reporter_series" (use the exact code, no variations).`
+- timing_unusual_but_possible`
 }
 
 /**
- * Agent 4: Legal Knowledge Validator
- * Focus: Broad application of legal knowledge and awareness
+ * Agent 4: Knowledge Generalist
+ * Focus: Broad doctrinal plausibility (NOT hallucination detection)
+ * Role: Check whether the authority makes basic legal sense.
  */
 export function getLegalKnowledgeValidatorPrompt(
   citation: Citation,
   context: string
 ): string {
-  return `You are a legal knowledge validator. Using your comprehensive knowledge of 
-American legal systems, courts, reporters, statutes, and case law, assess 
-whether this citation appears to be real or fabricated.
+  return `You are a broad legal knowledge validator. You evaluate general doctrinal and
+subject-matter plausibility.
+
+You DO NOT:
+- Penalize generic names
+- Treat "too perfect fit" as suspicious
+- Use deep pattern analysis (Tier 3 does that)
+- Perform structural or temporal checks
 
 Citation: ${citation.citationText}
 Citation Type: ${citation.citationType}
-Document Context: ${context}
+Context: ${context}
 
-Drawing on your knowledge of:
-- Legal citation formats and practices
-- Court systems and reporter publications
-- Actual case law and statutes
-- How lawyers typically cite authority
-- Common patterns in real vs. fabricated citations
+Evaluate ONLY:
+- Does this type of authority logically apply to this issue?
+- Is this court an appropriate forum for this subject matter?
+- Does the general legal rule described plausibly match the authority category?
 
-Make a holistic assessment: Does this citation feel real based on your knowledge 
-of the legal landscape, or does it have the marks of an AI fabrication?
+If broadly consistent → VALID.
+If clearly doctrinally impossible → INVALID.
+If unfamiliar or unclear → UNCERTAIN (preferred).
 
-Your Task:
-Using everything you know about law, courts, reporters, statutes, case law, and 
-legal practices, investigate this citation thoroughly. Your goal is to determine 
-with high confidence whether this citation is real or fabricated.
+Respond EXACTLY with:
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
 
-Respond with EXACTLY one of:
-- VALID: Citation is likely real
-- INVALID [reason_code]: Citation is likely fabricated
-- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
-
-If INVALID, you MUST use one of these exact reason codes:
+INVALID reason codes:
 - inconsistent_with_knowledge
-- hallucination_pattern
 - unknown_authority
-- implausible_combination
+- doctrine_impossible
+- jurisdiction_mismatch
 
-If UNCERTAIN, you MUST use one of these exact reason codes:
+UNCERTAIN reason codes:
 - unfamiliar_but_possible
 - edge_case_authority
-- weak_signals_both_ways
-
-Format your response as: "INVALID inconsistent_with_knowledge" or "UNCERTAIN unfamiliar_but_possible" (use the exact code, no variations).`
+- weak_signals_both_ways`
 }
 
 /**
- * Agent 5: Reality Assessment Expert
- * Focus: Synthesis and overall reality assessment
+ * Agent 5: Reality Generalist
+ * Focus: High-level cross-dimensional contradiction check
+ * Role: Provide extremely light-touch anomaly sensing.
  */
 export function getRealityAssessmentExpertPrompt(
   citation: Citation,
   context: string
 ): string {
-  return `You are a reality assessment expert. Synthesize everything you know about legal 
-citations, hallucination patterns, and legal authority to provide a final 
-assessment of whether this citation is likely real or invented.
+  return `You are a broad-pattern reality checker. Your job is to detect ONLY clear
+cross-dimensional contradictions.
+
+You DO NOT:
+- Treat "too perfect fit" as suspicious
+- Penalize generic names
+- Use intuition or vibes
+- Perform hallucination detection (Tier 3 does this)
+- Override specialists on metadata, timeline, or ecology
 
 Citation: ${citation.citationText}
 Citation Type: ${citation.citationType}
-Full Document Context: ${context}
+Context: ${context}
 
-Consider:
-- Does the citation have the characteristics of real legal authority?
-- Are there patterns that suggest AI invention?
-- Does the overall gestalt of the citation feel authentic?
-- What is your confidence in this assessment?
+Evaluate ONLY:
+- Are there contradictions between authority type, issue, and jurisdiction?
+- Are there combinations that cannot coexist (e.g., criminal statute cited as civil precedent)?
+- Is the formatting structurally incoherent in a way no specialist would handle?
 
-Common hallucination markers in AI-generated citations:
-- Suspiciously convenient page numbers (e.g., always starting at round numbers)
-- Party names that feel like examples rather than real parties
-- Citations that perfectly support an argument in ways that feel constructed
-- Unusual specificity (pin-cites to exact page numbers that seem tailored)
-- Combinations that technically work but feel "too perfect"
+If no contradictions → VALID.
+If contradictions are clear → INVALID.
+If merely unusual → UNCERTAIN.
 
-Real citations often:
-- Have messier specifics
-- May have unusual party names
-- Sometimes have odd page number progressions
-- Feel embedded in actual discourse rather than inserted
+Respond EXACTLY with:
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
 
-Make a holistic judgment: Is this citation real or fabricated?
+INVALID reason codes:
+- cross_dimension_contradiction
+- structural_incoherence
+- authority_category_mismatch
+- impossible_combination
 
-Respond with EXACTLY one of:
-- VALID: Citation is likely real
-- INVALID [reason_code]: Citation is likely fabricated
-- UNCERTAIN [reason_code]: Citation could be either; insufficient basis for confident judgment
-
-If INVALID, you MUST use one of these exact reason codes:
-- fabrication_markers
-- too_perfect_fit
-- implausible_synthesis
-- overall_unreality
-
-If UNCERTAIN, you MUST use one of these exact reason codes:
+UNCERTAIN reason codes:
 - mixed_signals
 - insufficient_evidence
-- edge_case_assessment
-
-Format your response as: "INVALID fabrication_markers" or "UNCERTAIN mixed_signals" (use the exact code, no variations).`
+- unusual_but_not_invalid`
 }
 

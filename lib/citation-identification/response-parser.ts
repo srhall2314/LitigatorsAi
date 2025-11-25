@@ -62,18 +62,18 @@ export function parseAgentResponse(
         'anachronistic_issue',
         'historical_mismatch',
         'future_dated',
-        'party_names_artificial',
         'case_type_implausible',
-        'generic_pattern_suspicious',
         'characteristics_mismatch',
+        'party_role_impossible',
+        'entity_type_impossible',
         'inconsistent_with_knowledge',
-        'hallucination_pattern',
         'unknown_authority',
-        'implausible_combination',
-        'fabrication_markers',
-        'too_perfect_fit',
-        'implausible_synthesis',
-        'overall_unreality'
+        'doctrine_impossible',
+        'jurisdiction_mismatch',
+        'cross_dimension_contradiction',
+        'structural_incoherence',
+        'authority_category_mismatch',
+        'impossible_combination'
       ]
       
       for (const reason of knownReasons) {
@@ -114,7 +114,7 @@ export function parseAgentResponse(
         'weak_signals_both_ways',
         'mixed_signals',
         'insufficient_evidence',
-        'edge_case_assessment'
+        'unusual_but_not_invalid'
       ]
       
       for (const reason of knownReasons) {
