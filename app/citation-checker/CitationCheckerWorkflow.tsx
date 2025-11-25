@@ -377,6 +377,10 @@ function UploadStep({
 }) {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -416,6 +420,38 @@ function UploadStep({
     if (bytes < 1024) return bytes + " B"
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB"
     return (bytes / (1024 * 1024)).toFixed(2) + " MB"
+  }
+
+  const handleDeleteClick = (fileId: string, e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent triggering file select
+    setConfirmDeleteId(fileId)
+  }
+
+  const handleDeleteConfirm = async (fileId: string) => {
+    setDeletingFileId(fileId)
+    try {
+      const res = await fetch(`/api/citation-checker/files/${fileId}`, {
+        method: "DELETE",
+      })
+
+      if (res.ok) {
+        // Refresh files list
+        onRefresh()
+        setConfirmDeleteId(null)
+      } else {
+        const errorData = await res.json()
+        alert(`Failed to delete file: ${errorData.error || 'Unknown error'}`)
+      }
+    } catch (error) {
+      console.error("Delete error:", error)
+      alert("Failed to delete file. Please try again.")
+    } finally {
+      setDeletingFileId(null)
+    }
+  }
+
+  const handleDeleteCancel = () => {
+    setConfirmDeleteId(null)
   }
 
   return (
@@ -499,6 +535,13 @@ function UploadStep({
                           Select & Generate JSON
                         </button>
                       )}
+                      <button
+                        onClick={(e) => handleDeleteClick(file.id, e)}
+                        disabled={deletingFileId === file.id}
+                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {deletingFileId === file.id ? "Deleting..." : "Delete"}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -507,6 +550,35 @@ function UploadStep({
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Confirm Delete
+            </h3>
+            <p className="text-gray-700 mb-6">
+              Are you sure you want to delete this file and all associated reports? 
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={handleDeleteCancel}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteConfirm(confirmDeleteId)}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

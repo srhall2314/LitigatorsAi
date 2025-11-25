@@ -3,7 +3,7 @@
  * Per tier3prompt.md specification
  */
 
-import { Citation, CitationValidation, Tier3Verdict, Tier3Confidence } from '@/types/citation-json'
+import { Citation, CitationValidation, Tier3Verdict, Tier3Confidence, Tier3AgentVerdictType } from '@/types/citation-json'
 
 export interface ParsedTier3Response {
   verdict: Tier3Verdict
@@ -11,6 +11,14 @@ export interface ParsedTier3Response {
   key_evidence: string
   remaining_uncertainties?: string
   confidence: Tier3Confidence
+}
+
+// New interface for panel agent responses
+export interface ParsedTier3AgentResponse {
+  verdict: Tier3AgentVerdictType // VALID, INVALID, or UNCERTAIN
+  reasoning: string
+  invalid_reason?: string
+  uncertain_reason?: string
 }
 
 /**
@@ -137,6 +145,83 @@ export function parseTier3Response(responseText: string): ParsedTier3Response {
   }
 }
 
+/**
+ * Parse Tier 3 agent response for panel system (returns VALID/INVALID/UNCERTAIN)
+ */
+export function parseTier3AgentResponse(responseText: string, agentName: string): ParsedTier3AgentResponse {
+  const lines = responseText.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+  
+  let verdict: Tier3AgentVerdictType = 'UNCERTAIN'
+  let reasoning = ''
+  let invalid_reason: string | undefined
+  let uncertain_reason: string | undefined
+  
+  // Extract verdict - look for VALID, INVALID, or UNCERTAIN
+  const verdictLine = lines.find(l => l.toUpperCase().startsWith('VERDICT:'))
+  if (verdictLine) {
+    const verdictText = verdictLine.substring(8).trim().toUpperCase()
+    if (verdictText.includes('VALID') && !verdictText.includes('INVALID')) {
+      verdict = 'VALID'
+    } else if (verdictText.includes('INVALID')) {
+      verdict = 'INVALID'
+    } else {
+      verdict = 'UNCERTAIN'
+    }
+  } else {
+    // Try to find verdict without label
+    const upperText = responseText.toUpperCase()
+    if (upperText.includes('VALID') && !upperText.includes('INVALID')) {
+      verdict = 'VALID'
+    } else if (upperText.includes('INVALID')) {
+      verdict = 'INVALID'
+    } else {
+      verdict = 'UNCERTAIN'
+    }
+  }
+  
+  // Extract reasoning
+  const reasoningLine = lines.findIndex(l => l.toUpperCase().startsWith('REASONING:'))
+  if (reasoningLine !== -1) {
+    reasoning = lines[reasoningLine].substring(11).trim()
+    // Try to get multi-line reasoning
+    let nextLine = reasoningLine + 1
+    while (nextLine < lines.length && 
+           !lines[nextLine].toUpperCase().startsWith('INVALID_REASON:') &&
+           !lines[nextLine].toUpperCase().startsWith('UNCERTAIN_REASON:')) {
+      reasoning += ' ' + lines[nextLine]
+      nextLine++
+    }
+  }
+  
+  // Extract invalid_reason if present
+  const invalidReasonLine = lines.findIndex(l => l.toUpperCase().startsWith('INVALID_REASON:'))
+  if (invalidReasonLine !== -1) {
+    invalid_reason = lines[invalidReasonLine].substring(15).trim()
+  }
+  
+  // Extract uncertain_reason if present
+  const uncertainReasonLine = lines.findIndex(l => l.toUpperCase().startsWith('UNCERTAIN_REASON:'))
+  if (uncertainReasonLine !== -1) {
+    uncertain_reason = lines[uncertainReasonLine].substring(17).trim()
+  }
+  
+  // Fallback: if we couldn't extract structured data, try to infer from the text
+  if (!reasoning && responseText.length > 0) {
+    // Try to extract reasoning from the first paragraph
+    const paragraphs = responseText.split(/\n\s*\n/).filter(p => p.trim().length > 0)
+    if (paragraphs.length > 0) {
+      reasoning = paragraphs[0].trim()
+    }
+  }
+  
+  return {
+    verdict,
+    reasoning: reasoning || 'No reasoning provided',
+    invalid_reason,
+    uncertain_reason,
+  }
+}
+
 export function getTier3InvestigationPrompt(
   citation: Citation,
   context: string,
@@ -206,32 +291,36 @@ Investigation Steps:
 Provide Your Assessment:
 
 Respond with EXACTLY one of:
-- VERIFIED_REAL: Citation is real with high confidence
-- LIKELY_REAL: Citation appears real but with some uncertainty
-- LIKELY_FABRICATED: Citation appears fabricated with reasonable confidence
-- NEEDS_HUMAN_REVIEW: Citation appears real or structurally valid, but contains issues, contradictions, or context mismatches that require a human editor to resolve
+- VALID: Citation appears to be real and legitimate. No significant issues detected.
+- INVALID: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
+- UNCERTAIN: Citation may be real but has issues requiring review, or insufficient information to determine validity.
 
-Use NEEDS_HUMAN_REVIEW when you detect:
+Use VALID when:
+- Citation structure is correct and credible
+- No red flags or fabrication markers detected
+- Citation appears legitimate based on your knowledge
+
+Use INVALID when:
+- Clear evidence of fabrication or hallucination
+- Citation structure is implausible or impossible
+- Multiple red flags indicating fabrication
+
+Use UNCERTAIN when:
+- Citation appears structurally valid but has inconsistencies
 - Temporal inconsistencies (e.g., 2023 WL citation with 2020 parenthetical date)
-- Wrong parenthetical dates
-- Wrong court or jurisdiction in parenthetical
-- Case citation format used where a party brief is described
-- WL/Lexis cite whose year conflicts with filing description
-- Incomplete citations
-- Any metadata that doesn't align
-- Anything that is not fabricated, but not acceptable as-is
+- Wrong parenthetical dates or court information
+- Incomplete citations or metadata misalignment
+- Any issues that require human review but don't clearly indicate fabrication
 
 Then provide:
-1. Your reasoning (2-3 sentences)
-2. Key evidence supporting your assessment
-3. Remaining uncertainties (if any)
-4. Confidence level (high/medium/low)
+1. Your reasoning (2-3 sentences explaining your verdict)
+2. If INVALID: provide invalid_reason code
+3. If UNCERTAIN: provide uncertain_reason code
 
 Format your response as:
-VERDICT: [one of the four verdicts above]
-REASONING: [2-3 sentences]
-KEY_EVIDENCE: [key evidence]
-UNCERTAINTIES: [remaining uncertainties, or "None" if none]
-CONFIDENCE: [high/medium/low]`
+VERDICT: [VALID, INVALID, or UNCERTAIN]
+REASONING: [2-3 sentences explaining your assessment]
+INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
+UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]`
 }
 

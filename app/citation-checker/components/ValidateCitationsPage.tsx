@@ -113,6 +113,14 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
           const data = JSON.parse(event.data)
           console.log('[Progress] Received:', data.type, data)
           
+          // Check for error messages (with or without type field)
+          if (data.error || data.type === "error") {
+            alert(`Failed to validate citations: ${data.error || "Unknown error"}`)
+            eventSource.close()
+            setValidating(false)
+            return
+          }
+          
           if (data.type === "start") {
             setProgress(prev => ({
               ...prev,

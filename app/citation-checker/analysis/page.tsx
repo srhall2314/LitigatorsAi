@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
-import { AnalysisStatistics, CitationDocument, Citation, CitationValidation, Tier3Verdict, ValidationVerdict, AgreementLevel } from "@/types/citation-json"
+import { AnalysisStatistics, CitationDocument, Citation, CitationValidation, Tier3Verdict, Tier3FinalStatus, ValidationVerdict, AgreementLevel } from "@/types/citation-json"
+import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import { prisma } from "@/lib/prisma"
 
 async function getAnalysisData(): Promise<AnalysisStatistics | null> {
@@ -47,6 +48,11 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
         tier3WithUnanimousTier2: 0,
         tier3WithUnanimousTier2Rate: 0,
         verdicts: {
+          VALID: 0,
+          WARN: 0,
+          FAIL: 0,
+        },
+        legacyVerdicts: {
           VERIFIED_REAL: 0,
           LIKELY_REAL: 0,
           LIKELY_FABRICATED: 0,
@@ -164,12 +170,11 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
             documentHasAllThreeTiers = false
           } else {
             // Count invalid citations
-            // Invalid if: Tier 3 verdict is LIKELY_FABRICATED or NEEDS_HUMAN_REVIEW
+            // Invalid if: Tier 3 final_status is FAIL or WARN
             // OR if Tier 2 consensus flagged it but no Tier 3 yet (shouldn't happen if completed)
-            if (hasTier3 && citation.tier_3 && (
-              citation.tier_3.verdict === 'LIKELY_FABRICATED' || 
-              citation.tier_3.verdict === 'NEEDS_HUMAN_REVIEW'
-            )) {
+            if (hasTier3 && citation.tier_3) {
+              const tier3Status = getTier3FinalStatus(citation.tier_3)
+              if (tier3Status === 'FAIL' || tier3Status === 'WARN') {
               documentInvalidCount++
             }
 
@@ -185,9 +190,10 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
               documentTier3RunsCount++
             }
 
-            // Count Tier 3 validated citations - citations where Tier 3 verdict is VERIFIED_REAL or LIKELY_REAL
+            // Count Tier 3 validated citations - citations where Tier 3 final_status is VALID
             if (hasTier3 && citation.tier_3) {
-              if (citation.tier_3.verdict === 'VERIFIED_REAL' || citation.tier_3.verdict === 'LIKELY_REAL') {
+              const tier3Status = getTier3FinalStatus(citation.tier_3)
+              if (tier3Status === 'VALID') {
                 documentTier3ValidatedCount++
               }
             }

@@ -16,6 +16,7 @@ export type Tier2Consensus = "VALID" | "FLAG_FOR_REVIEW";
 export type Tier3Severity = "LOW" | "MEDIUM" | "HIGH";
 
 // Tier 3 Validation Types (per tier3prompt.md)
+// Legacy verdicts - kept for backward compatibility
 export type Tier3Verdict = 
   | "VERIFIED_REAL" 
   | "LIKELY_REAL" 
@@ -23,6 +24,35 @@ export type Tier3Verdict =
   | "NEEDS_HUMAN_REVIEW";
 
 export type Tier3Confidence = "high" | "medium" | "low";
+
+// Tier 3 Panel Types (new 3-call panel system)
+export type Tier3AgentVerdictType = "VALID" | "INVALID" | "UNCERTAIN";
+
+export type Tier3FinalStatus = "VALID" | "WARN" | "FAIL";
+
+export type Tier3AgreementLevel = "unanimous" | "majority" | "split";
+
+export interface Tier3AgentVerdict {
+  agent: string; // e.g., "tier3_agent_1", "tier3_agent_2", "tier3_agent_3"
+  verdict: Tier3AgentVerdictType;
+  reasoning?: string; // Optional reasoning from the agent
+  invalid_reason?: string; // Reason code if verdict is INVALID
+  uncertain_reason?: string; // Reason code if verdict is UNCERTAIN
+  timestamp: string; // ISO 8601 timestamp
+  model: string; // e.g., "claude-sonnet-4-5-20250929"
+}
+
+export interface Tier3Consensus {
+  agreement_level: Tier3AgreementLevel;
+  verdict_counts: {
+    VALID: number;
+    INVALID: number;
+    UNCERTAIN: number;
+  };
+  final_status: Tier3FinalStatus; // VALID (3/3), WARN (2/3), or FAIL (<2/3)
+  confidence_score: number; // 0.0-1.0
+  reasoning: string;
+}
 
 // Tier 2 Validation Types (per validationT2.md)
 export type ValidationVerdict = "VALID" | "INVALID" | "UNCERTAIN";
@@ -128,13 +158,20 @@ export interface Tier2Result {
 }
 
 export interface Tier3Result {
-  verdict: Tier3Verdict;
-  reasoning: string; // 2-3 sentences explaining the assessment
-  key_evidence: string; // Key evidence supporting the assessment
-  remaining_uncertainties?: string; // Remaining uncertainties (if any)
-  confidence: Tier3Confidence; // high/medium/low
+  // New panel-based structure
+  panel_evaluation: Tier3AgentVerdict[]; // 3 agent verdicts
+  consensus: Tier3Consensus;
+  
+  // Legacy fields - kept for backward compatibility
+  // These will be populated from panel_evaluation for old format compatibility
+  verdict?: Tier3Verdict; // Deprecated - use consensus.final_status instead
+  reasoning?: string; // Aggregated from panel or single agent
+  key_evidence?: string; // Aggregated from panel
+  remaining_uncertainties?: string;
+  confidence?: Tier3Confidence; // Deprecated - use consensus.confidence_score instead
+  
   timestamp: string; // ISO 8601 timestamp
-  model: string; // e.g., "claude-3-sonnet-20240229"
+  model: string; // e.g., "claude-sonnet-4-5-20250929"
 }
 
 export interface CitationRecommendation {
@@ -191,7 +228,9 @@ export interface AnalysisStatistics {
     escalationRate: number;
     tier3WithUnanimousTier2: number;
     tier3WithUnanimousTier2Rate: number;
-    verdicts: Record<Tier3Verdict, number>;
+    verdicts: Record<Tier3FinalStatus, number>; // VALID, WARN, FAIL
+    // Legacy verdicts kept for backward compatibility
+    legacyVerdicts?: Record<Tier3Verdict, number>;
   };
   agentAgreement: {
     pairwiseMatrix: Record<string, Record<string, number>>;

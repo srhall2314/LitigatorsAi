@@ -135,13 +135,13 @@ export async function GET(
         const session = await getServerSession(authOptions)
         
         if (!session?.user?.email) {
-          sendProgress({ error: "Unauthorized" })
+          sendProgress({ type: "error", error: "Unauthorized" })
           controller.close()
           return
         }
 
         if (!ANTHROPIC_API_KEY) {
-          sendProgress({ error: "Anthropic API key not configured" })
+          sendProgress({ type: "error", error: "Anthropic API key not configured" })
           controller.close()
           return
         }
@@ -151,7 +151,7 @@ export async function GET(
         })
 
         if (!user) {
-          sendProgress({ error: "User not found" })
+          sendProgress({ type: "error", error: "User not found" })
           controller.close()
           return
         }
@@ -162,13 +162,13 @@ export async function GET(
         })
 
         if (!currentCheck) {
-          sendProgress({ error: "Citation check not found" })
+          sendProgress({ type: "error", error: "Citation check not found" })
           controller.close()
           return
         }
 
         if (!currentCheck.jsonData) {
-          sendProgress({ error: "JSON data not found" })
+          sendProgress({ type: "error", error: "JSON data not found" })
           controller.close()
           return
         }
@@ -176,7 +176,7 @@ export async function GET(
         const jsonData = currentCheck.jsonData as any
         
         if (!jsonData.document?.citations || jsonData.document.citations.length === 0) {
-          sendProgress({ error: "No citations found" })
+          sendProgress({ type: "error", error: "No citations found" })
           controller.close()
           return
         }

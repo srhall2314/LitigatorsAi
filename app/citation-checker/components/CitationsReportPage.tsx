@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from "react"
 import { ContextPanel } from "./ContextPanel"
-import { CitationValidation, ValidationVerdict } from "@/types/citation-json"
+import { CitationValidation, ValidationVerdict, Tier3FinalStatus } from "@/types/citation-json"
+import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import jsPDF from "jspdf"
-import html2canvas from "html2canvas"
 
 interface CitationsReportPageProps {
   fileId: string
@@ -174,33 +174,37 @@ export function CitationsReportPage({ fileId }: CitationsReportPageProps) {
   // Tier 3 verdicts override Tier 2 when present
   const citationsWithValidation = citations.filter(c => c.validation)
   const validCount = citationsWithValidation.filter(c => {
-    // If Tier 3 exists and marks as valid, count as valid
-    if (c.tier_3 && (c.tier_3.verdict === "VERIFIED_REAL" || c.tier_3.verdict === "LIKELY_REAL")) {
-      return true
+    // If Tier 3 exists, use Tier 3 final_status
+    if (c.tier_3) {
+      const tier3Status = getTier3FinalStatus(c.tier_3)
+      return tier3Status === "VALID"
     }
     // Otherwise use Tier 2 recommendation
     return c.validation?.consensus.recommendation === "CITATION_LIKELY_VALID"
   }).length
   const invalidCount = citationsWithValidation.filter(c => {
-    // If Tier 3 exists and marks as invalid, count as invalid
-    if (c.tier_3 && c.tier_3.verdict === "LIKELY_FABRICATED") {
-      return true
+    // If Tier 3 exists, use Tier 3 final_status
+    if (c.tier_3) {
+      const tier3Status = getTier3FinalStatus(c.tier_3)
+      return tier3Status === "FAIL"
     }
     // Otherwise use Tier 2 recommendation
     return c.validation?.consensus.recommendation === "CITATION_LIKELY_HALLUCINATED"
   }).length
   const uncertainCount = citationsWithValidation.filter(c => {
-    // If Tier 3 exists, only count as uncertain if Tier 3 verdict is needs human review
+    // If Tier 3 exists, use Tier 3 final_status
     if (c.tier_3) {
-      return c.tier_3.verdict === "NEEDS_HUMAN_REVIEW"
+      const tier3Status = getTier3FinalStatus(c.tier_3)
+      return tier3Status === "WARN"
     }
     // Otherwise use Tier 2 recommendation
     return c.validation?.consensus.recommendation === "CITATION_UNCERTAIN"
   }).length
   const tier3Count = citations.filter(c => c.tier_3).length
-  const tier3ValidatedCount = citations.filter(c => 
-    c.tier_3 && (c.tier_3.verdict === "VERIFIED_REAL" || c.tier_3.verdict === "LIKELY_REAL")
-  ).length
+  const tier3ValidatedCount = citations.filter(c => {
+    const tier3Status = getTier3FinalStatus(c.tier_3)
+    return tier3Status === "VALID"
+  }).length
 
   // Sort citations: Invalid → Uncertain → Valid
   const sortedCitations = [...citationsWithValidation].sort((a, b) => {
@@ -279,148 +283,228 @@ export function CitationsReportPage({ fileId }: CitationsReportPageProps) {
   }
 
   const handleDownloadPDF = async () => {
-    if (!reportRef.current) {
-      alert('Report content not available. Please wait for the page to load.')
-      return
-    }
-
     setGeneratingPDF(true)
     
     try {
-      // Store reference to avoid null issues
-      const reportElement = reportRef.current
-      if (!reportElement) {
-        throw new Error('Report element not found')
-      }
-
-      // Hide buttons and context panel for PDF
-      const buttons = document.querySelectorAll('.pdf-hide')
-      const originalDisplays: string[] = []
-      buttons.forEach(btn => {
-        const element = btn as HTMLElement
-        originalDisplays.push(element.style.display)
-        element.style.display = 'none'
-      })
-
-      // Use requestAnimationFrame to allow UI to update
-      await new Promise(resolve => requestAnimationFrame(resolve))
-
-      // Wait a bit more to ensure DOM is ready
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      // Double-check element still exists
-      if (!reportRef.current) {
-        throw new Error('Report element was removed during PDF generation')
-      }
-
-      // Optimize canvas settings for better performance
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 1.5, // Reduced from 2 for better performance
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        removeContainer: false,
-        allowTaint: false,
-        imageTimeout: 15000,
-        onclone: (clonedDoc) => {
-          // Ensure cloned document has proper styling
-          const clonedElement = clonedDoc.querySelector('[data-report-content]')
-          if (clonedElement) {
-            (clonedElement as HTMLElement).style.overflow = 'visible'
-          }
-        }
-      })
-
-      const imgData = canvas.toDataURL('image/png', 0.95)
       const pdf = new jsPDF('p', 'mm', 'a4')
       const pdfWidth = pdf.internal.pageSize.getWidth()
       const pdfHeight = pdf.internal.pageSize.getHeight()
-      
-      // Convert pixels to mm (assuming 96 DPI)
-      const pxToMm = 0.264583
-      const imgWidthMm = (canvas.width * pxToMm) / 1.5 // Account for scale
-      const imgHeightMm = (canvas.height * pxToMm) / 1.5
-      
-      // Calculate how many pages we need
-      const imgAspectRatio = canvas.width / canvas.height
-      const pageAspectRatio = pdfWidth / pdfHeight
-      
-      // Scale image to fit page width
-      const scaledWidth = pdfWidth - 20 // Leave margins
-      const scaledHeight = (scaledWidth / imgAspectRatio)
-      
-      // Calculate number of pages needed
-      const totalPages = Math.ceil(scaledHeight / (pdfHeight - 20))
-      
-      // Add image to PDF, splitting across pages
-      let yPosition = 10 // Start with top margin
-      let sourceY = 0
-      
-      for (let page = 0; page < totalPages; page++) {
-        if (page > 0) {
+      const margin = 15
+      const pageWidth = pdfWidth - (margin * 2)
+      let yPosition = margin
+      const sectionSpacing = 10
+
+      // Helper function to add text with word wrapping and page breaks
+      const addText = (
+        text: string, 
+        fontSize: number = 10, 
+        isBold: boolean = false, 
+        color: [number, number, number] = [0, 0, 0],
+        align: 'left' | 'center' | 'right' = 'left'
+      ) => {
+        pdf.setFontSize(fontSize)
+        pdf.setFont('helvetica', isBold ? 'bold' : 'normal')
+        pdf.setTextColor(color[0], color[1], color[2])
+        
+        const lines = pdf.splitTextToSize(text, pageWidth)
+        const currentLineHeight = fontSize * 0.35 // Approximate line height in mm
+        
+        // Check if we need a new page
+        if (yPosition + (lines.length * currentLineHeight) > pdfHeight - margin) {
           pdf.addPage()
-          yPosition = 10 // Reset to top for new page
+          yPosition = margin
         }
         
-        // Calculate how much of the image fits on this page
-        const pageHeight = pdfHeight - 20 // Leave margins
-        const sourceHeight = (pageHeight / scaledHeight) * canvas.height
+        lines.forEach((line: string) => {
+          pdf.text(line, margin, yPosition, { align })
+          yPosition += currentLineHeight
+        })
+      }
+
+      // Helper function to check if we need a new page
+      const checkNewPage = (requiredSpace: number) => {
+        if (yPosition + requiredSpace > pdfHeight - margin) {
+          pdf.addPage()
+          yPosition = margin
+          return true
+        }
+        return false
+      }
+
+      // Helper function to add a horizontal line
+      const addHorizontalLine = () => {
+        checkNewPage(5)
+        pdf.setDrawColor(200, 200, 200)
+        pdf.line(margin, yPosition, pdfWidth + margin, yPosition)
+        yPosition += 3
+      }
+
+      // Title
+      addText('Citation Validation Report', 18, true, [0, 0, 0], 'center')
+      yPosition += sectionSpacing
+
+      // Document Metadata
+      if (metadata) {
+        addText('Document Information', 14, true)
+        yPosition += 3
+        addText(`File Name: ${metadata.filename}`, 11, true)
+        addText(`Upload Date: ${new Date(metadata.uploadDate).toLocaleDateString()}`, 10)
+        if (metadata.documentType) {
+          addText(`Document Type: ${metadata.documentType}`, 10)
+        }
+        if (metadata.identificationMethod) {
+          addText(`Identification Method: ${metadata.identificationMethod}`, 10)
+        }
+        yPosition += sectionSpacing
+        addHorizontalLine()
+        yPosition += sectionSpacing
+      }
+
+      // Summary Statistics
+      addText('Summary Statistics', 14, true)
+      yPosition += 5
+      
+      addText(`Total Citations: ${citations.length}`, 12, true)
+      addText(`Valid: ${validCount}`, 11, false, [34, 197, 94]) // green
+      addText(`Uncertain: ${uncertainCount}`, 11, false, [234, 179, 8]) // yellow
+      addText(`Invalid: ${invalidCount}`, 11, false, [239, 68, 68]) // red
+      addText(`Tier 3 Reviewed: ${tier3Count}`, 11, false, [147, 51, 234]) // purple
+      yPosition += sectionSpacing
+
+      // Summary paragraph
+      const summaryText = `Your document contains ${citations.length} citation${citations.length !== 1 ? 's' : ''}.` +
+        (validCount > 0 ? ` ${validCount} citation${validCount !== 1 ? 's were' : ' was'} validated successfully.` : '') +
+        (tier3ValidatedCount > 0 ? ` ${tier3ValidatedCount} citation${tier3ValidatedCount !== 1 ? 's were' : ' was'} validated by Tier 3 review.` : '') +
+        (uncertainCount > 0 ? ` ${uncertainCount} citation${uncertainCount !== 1 ? 's have' : ' has'} uncertain validation results.` : '') +
+        (invalidCount > 0 ? ` ${invalidCount} citation${invalidCount !== 1 ? 's were' : ' was'} flagged as potentially invalid.` : '') +
+        (tier3Count > 0 ? ` ${tier3Count} citation${tier3Count !== 1 ? 's received' : ' received'} deep investigation (Tier 3) review.` : '')
+      
+      addText(summaryText, 10)
+      yPosition += sectionSpacing * 2
+
+      // Citation Details
+      addText('Citation Details', 14, true)
+      yPosition += sectionSpacing
+
+      sortedCitations.forEach((citation, index) => {
+        checkNewPage(60) // Reserve space for citation block
         
-        // Create a temporary canvas for this page's portion
-        const pageCanvas = document.createElement('canvas')
-        pageCanvas.width = canvas.width
-        pageCanvas.height = Math.min(sourceHeight, canvas.height - sourceY)
-        const pageCtx = pageCanvas.getContext('2d')
+        // Citation number and type
+        const citationType = citation.citationType?.toUpperCase() || 'UNKNOWN'
+        addText(`Citation ${index + 1} [${citationType}]`, 12, true)
+        yPosition += 2
         
-        if (pageCtx) {
-          pageCtx.drawImage(
-            canvas,
-            0, sourceY, canvas.width, pageCanvas.height, // Source
-            0, 0, pageCanvas.width, pageCanvas.height // Destination
-          )
+        // Citation text
+        addText(citation.citationText, 10)
+        yPosition += 5
+
+        // Validation results
+        if (citation.validation) {
+          const consensus = citation.validation.consensus
+          const recommendation = consensus.recommendation
           
-          const pageImgData = pageCanvas.toDataURL('image/png', 0.95)
-          const pageImgHeight = (pageCanvas.height * pxToMm) / 1.5
-          const pageScaledHeight = Math.min(pageHeight, pageImgHeight)
+          let statusText = ''
+          let statusColor: [number, number, number] = [0, 0, 0]
           
-          pdf.addImage(
-            pageImgData,
-            'PNG',
-            10, // x offset (left margin)
-            yPosition,
-            scaledWidth,
-            pageScaledHeight
-          )
+          // Check Tier 3 first if it exists
+          if (citation.tier_3) {
+            const tier3Status = getTier3FinalStatus(citation.tier_3)
+            const consensus = citation.tier_3.consensus
+            
+            if (tier3Status === "VALID") {
+              statusText = 'Status: VALID (Tier 3 Verified)'
+              statusColor = [34, 197, 94]
+            } else if (tier3Status === "FAIL") {
+              statusText = 'Status: INVALID (Tier 3 Confirmed)'
+              statusColor = [239, 68, 68]
+            } else {
+              statusText = 'Status: WARN (Tier 3 Review)'
+              statusColor = [234, 179, 8]
+            }
+            
+            // Add Tier 3 consensus info
+            if (consensus) {
+              addText(`Tier 3 Consensus: ${consensus.verdict_counts.VALID}/3 Valid, ${consensus.verdict_counts.INVALID}/3 Invalid, ${consensus.verdict_counts.UNCERTAIN}/3 Uncertain`, 9)
+              addText(`Tier 3 Agreement: ${consensus.agreement_level} (${(consensus.confidence_score * 100).toFixed(0)}% confidence)`, 9)
+              yPosition += 2
+            }
+            
+            // Add Tier 3 reasoning if available
+            if (citation.tier_3.reasoning) {
+              addText(`Tier 3 Reasoning: ${citation.tier_3.reasoning}`, 9)
+              yPosition += 2
+            }
+            
+            // Show Tier 2 recommendation for comparison
+            let tier2Text = ''
+            if (recommendation === "CITATION_LIKELY_VALID") {
+              tier2Text = 'Tier 2 Recommendation: VALID'
+            } else if (recommendation === "CITATION_LIKELY_HALLUCINATED") {
+              tier2Text = 'Tier 2 Recommendation: INVALID'
+            } else {
+              tier2Text = 'Tier 2 Recommendation: UNCERTAIN'
+            }
+            addText(tier2Text, 9, false, [128, 128, 128])
+          } else {
+            // No Tier 3, use Tier 2 recommendation
+            if (recommendation === "CITATION_LIKELY_VALID") {
+              statusText = 'Status: VALID'
+              statusColor = [34, 197, 94]
+            } else if (recommendation === "CITATION_LIKELY_HALLUCINATED") {
+              statusText = 'Status: INVALID'
+              statusColor = [239, 68, 68]
+            } else {
+              statusText = 'Status: UNCERTAIN'
+              statusColor = [234, 179, 8]
+            }
+          }
           
-          sourceY += pageCanvas.height
+          addText(statusText, 10, true, statusColor)
+          addText(`Confidence Score: ${(consensus.confidence_score * 100).toFixed(0)}%`, 10)
+          addText(`Agreement Level: ${consensus.agreement_level}`, 10)
           
-          // Break if we've processed all the image
-          if (sourceY >= canvas.height) {
-            break
+          if (consensus.reasoning) {
+            addText(`Reasoning: ${consensus.reasoning}`, 9)
+            yPosition += 2
+          }
+
+          // Panel evaluation summary
+          if (citation.validation.panel_evaluation && citation.validation.panel_evaluation.length > 0) {
+            const verdicts = citation.validation.panel_evaluation.map(a => a.verdict)
+            const validCount = verdicts.filter(v => v === 'VALID').length
+            const uncertainCount = verdicts.filter(v => v === 'UNCERTAIN').length
+            const invalidCount = verdicts.filter(v => v === 'INVALID').length
+            addText(`Panel Evaluation: ${validCount} Valid / ${uncertainCount} Uncertain / ${invalidCount} Invalid`, 9)
+            
+            // List individual agent verdicts
+            citation.validation.panel_evaluation.forEach(agent => {
+              const agentName = getAgentDisplayName(agent.agent)
+              const verdictText = `${agentName}: ${agent.verdict}`
+              addText(verdictText, 8, false, [100, 100, 100])
+            })
+          }
+
+          // Document context if available
+          if (citation.paragraphId && citation.paragraphText) {
+            yPosition += 3
+            addText(`Document Context (${citation.paragraphId}):`, 9, true)
+            addText(citation.paragraphText.substring(0, 500) + (citation.paragraphText.length > 500 ? '...' : ''), 8, false, [80, 80, 80])
           }
         }
-      }
+        
+        yPosition += sectionSpacing
+        addHorizontalLine()
+        yPosition += sectionSpacing
+      })
 
       const filename = metadata?.filename 
         ? `CC-${metadata.filename.replace(/\.[^/.]+$/, '')}-${new Date().toISOString().split('T')[0]}.pdf`
         : `CC-Report-${new Date().toISOString().split('T')[0]}.pdf`
 
       pdf.save(filename)
-
-      // Restore buttons
-      buttons.forEach((btn, index) => {
-        const element = btn as HTMLElement
-        element.style.display = originalDisplays[index] || ''
-      })
     } catch (error) {
       console.error('Error generating PDF:', error)
-      alert(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}. The page may be too large. Try printing instead.`)
-      
-      // Restore buttons on error
-      const buttons = document.querySelectorAll('.pdf-hide')
-      buttons.forEach(btn => {
-        ;(btn as HTMLElement).style.display = ''
-      })
+      alert(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setGeneratingPDF(false)
     }
@@ -553,20 +637,20 @@ export function CitationsReportPage({ fileId }: CitationsReportPageProps) {
                   // Square badge = Tier 3 verdict (only if Tier 3 exists)
                   let badgeElement = null
                   if (citation.tier_3) {
-                    const tier3Verdict = citation.tier_3.verdict
+                    const tier3Status = getTier3FinalStatus(citation.tier_3)
+                    const consensus = citation.tier_3.consensus
                     let badgeStatus: 'valid' | 'invalid' | 'uncertain'
                     let badgeLabel: string
                     
-                    if (tier3Verdict === "VERIFIED_REAL" || tier3Verdict === "LIKELY_REAL") {
+                    if (tier3Status === "VALID") {
                       badgeStatus = 'valid'
-                      badgeLabel = "V"
-                    } else if (tier3Verdict === "LIKELY_FABRICATED") {
+                      badgeLabel = consensus ? `${consensus.verdict_counts.VALID}/3` : "V"
+                    } else if (tier3Status === "FAIL") {
                       badgeStatus = 'invalid'
-                      badgeLabel = "I"
+                      badgeLabel = consensus ? `${consensus.verdict_counts.VALID}/3` : "I"
                     } else {
-                      // NEEDS_HUMAN_REVIEW or other
                       badgeStatus = 'uncertain'
-                      badgeLabel = "U"
+                      badgeLabel = consensus ? `${consensus.verdict_counts.VALID}/3` : "W"
                     }
                     
                     badgeElement = (
@@ -661,57 +745,52 @@ export function CitationsReportPage({ fileId }: CitationsReportPageProps) {
                             </span>
                             
                             {/* Show Tier 3 verdict if it exists and overrides Tier 2 */}
-                            {citation.tier_3 && (
-                              citation.tier_3.verdict === "VERIFIED_REAL" || citation.tier_3.verdict === "LIKELY_REAL" ? (
-                                <>
-                                  <span className="px-3 py-1 text-sm font-semibold rounded bg-green-100 text-green-800 border-2 border-green-300">
-                                    ✓ VALID (Tier 3)
-                                  </span>
-                                  <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
-                                    Updated by Tier 3
-                                  </span>
-                                  <span className={`px-2 py-1 text-xs font-medium rounded ${
-                                    consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
-                                    'bg-yellow-100 text-yellow-800'
-                                  }`}>
-                                    Tier 2: {consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" : "UNCERTAIN"}
-                                  </span>
-                                </>
-                              ) : citation.tier_3.verdict === "LIKELY_FABRICATED" ? (
-                                <>
-                                  <span className="px-3 py-1 text-sm font-semibold rounded bg-red-100 text-red-800 border-2 border-red-300">
-                                    INVALID (Tier 3)
-                                  </span>
-                                  <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
-                                    Confirmed by Tier 3
-                                  </span>
-                                </>
-                              ) : citation.tier_3.verdict === "NEEDS_HUMAN_REVIEW" ? (
-                                <>
-                                  <span className="px-3 py-1 text-sm font-semibold rounded bg-orange-100 text-orange-800 border-2 border-orange-300">
-                                    NEEDS REVIEW (Tier 3)
-                                  </span>
-                                  <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
-                                    Requires Human Review
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className={`px-3 py-1 text-sm font-semibold rounded ${
-                                    consensus.recommendation === "CITATION_LIKELY_VALID" ? 'bg-green-100 text-green-800' :
-                                    consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
-                                    'bg-yellow-100 text-yellow-800'
-                                  }`}>
-                                    {consensus.recommendation === "CITATION_LIKELY_VALID" ? "VALID" :
-                                     consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" :
-                                     "UNCERTAIN"}
-                                  </span>
-                                  <span className="px-2 py-1 text-xs font-medium rounded bg-orange-100 text-orange-800">
-                                    Tier 3: {citation.tier_3.verdict.replace(/_/g, ' ')}
-                                  </span>
-                                </>
-                              )
-                            )}
+                            {citation.tier_3 && (() => {
+                              const tier3Status = getTier3FinalStatus(citation.tier_3)
+                              const tier3Consensus = citation.tier_3.consensus
+                              const validCount = tier3Consensus?.verdict_counts.VALID || 0
+                              
+                              if (tier3Status === "VALID") {
+                                return (
+                                  <>
+                                    <span className="px-3 py-1 text-sm font-semibold rounded bg-green-100 text-green-800 border-2 border-green-300">
+                                      ✓ VALID (Tier 3: {validCount}/3)
+                                    </span>
+                                    <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
+                                      Updated by Tier 3
+                                    </span>
+                                    <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                      consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
+                                      'bg-yellow-100 text-yellow-800'
+                                    }`}>
+                                      Tier 2: {consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" : "UNCERTAIN"}
+                                    </span>
+                                  </>
+                                )
+                              } else if (tier3Status === "FAIL") {
+                                return (
+                                  <>
+                                    <span className="px-3 py-1 text-sm font-semibold rounded bg-red-100 text-red-800 border-2 border-red-300">
+                                      INVALID (Tier 3: {validCount}/3)
+                                    </span>
+                                    <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
+                                      Confirmed by Tier 3
+                                    </span>
+                                  </>
+                                )
+                              } else {
+                                return (
+                                  <>
+                                    <span className="px-3 py-1 text-sm font-semibold rounded bg-orange-100 text-orange-800 border-2 border-orange-300">
+                                      WARN (Tier 3: {validCount}/3)
+                                    </span>
+                                    <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
+                                      Requires Review
+                                    </span>
+                                  </>
+                                )
+                              }
+                            })()}
                             
                             {/* Default Tier 2 status if no Tier 3 */}
                             {!citation.tier_3 && (
@@ -852,38 +931,88 @@ export function CitationsReportPage({ fileId }: CitationsReportPageProps) {
                     {/* Tier 3 Investigation Results */}
                     {citation.tier_3 && (
                       <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-md">
-                        <h5 className="text-sm font-semibold text-purple-900 mb-3">Tier 3: Deep Investigation</h5>
+                        <h5 className="text-sm font-semibold text-purple-900 mb-3">Tier 3: Panel Investigation</h5>
                         <div className="space-y-3">
-                          <div>
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className={`px-3 py-1 text-sm font-semibold rounded ${
-                                citation.tier_3.verdict === "VERIFIED_REAL" ? 'bg-green-100 text-green-800' :
-                                citation.tier_3.verdict === "LIKELY_REAL" ? 'bg-blue-100 text-blue-800' :
-                                citation.tier_3.verdict === "LIKELY_FABRICATED" ? 'bg-red-100 text-red-800' :
-                                citation.tier_3.verdict === "NEEDS_HUMAN_REVIEW" ? 'bg-orange-100 text-orange-800' :
-                                'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {citation.tier_3.verdict.replace(/_/g, ' ')}
-                              </span>
-                              <span className={`px-2 py-1 text-xs font-medium rounded ${
-                                citation.tier_3.confidence === "high" ? 'bg-green-100 text-green-800' :
-                                citation.tier_3.confidence === "medium" ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {citation.tier_3.confidence.toUpperCase()} Confidence
-                              </span>
+                          {/* Consensus Summary */}
+                          {citation.tier_3.consensus && (
+                            <div>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={`px-3 py-1 text-sm font-semibold rounded ${
+                                  citation.tier_3.consensus.final_status === "VALID" ? 'bg-green-100 text-green-800' :
+                                  citation.tier_3.consensus.final_status === "FAIL" ? 'bg-red-100 text-red-800' :
+                                  'bg-orange-100 text-orange-800'
+                                }`}>
+                                  {citation.tier_3.consensus.final_status} ({citation.tier_3.consensus.verdict_counts.VALID}/3 Valid)
+                                </span>
+                                <span className="px-2 py-1 text-xs font-medium rounded bg-gray-100 text-gray-800">
+                                  {citation.tier_3.consensus.agreement_level} ({Math.round(citation.tier_3.consensus.confidence_score * 100)}%)
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-600 mb-2">
+                                {citation.tier_3.consensus.reasoning}
+                              </div>
                             </div>
-                          </div>
+                          )}
                           
-                          <div>
-                            <div className="text-xs font-medium text-gray-700 mb-1">Reasoning</div>
-                            <p className="text-sm text-gray-700">{citation.tier_3.reasoning}</p>
-                          </div>
+                          {/* Panel Evaluation Details */}
+                          {citation.tier_3.panel_evaluation && citation.tier_3.panel_evaluation.length > 0 && (
+                            <div>
+                              <div className="text-xs font-medium text-gray-700 mb-2">Panel Evaluation Results</div>
+                              <div className="space-y-2">
+                                {citation.tier_3.panel_evaluation.map((agent: any, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="p-2 border border-gray-200 rounded-md bg-white"
+                                  >
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="flex items-center gap-2">
+                                        <div className={`w-3 h-3 rounded-full ${
+                                          agent.verdict === 'VALID' ? 'bg-green-500' :
+                                          agent.verdict === 'INVALID' ? 'bg-red-500' :
+                                          'bg-yellow-500'
+                                        }`} />
+                                        <span className="text-xs font-medium text-gray-900">
+                                          {agent.agent}
+                                        </span>
+                                      </div>
+                                      <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                                        agent.verdict === 'VALID' ? 'bg-green-100 text-green-800' :
+                                        agent.verdict === 'INVALID' ? 'bg-red-100 text-red-800' :
+                                        'bg-yellow-100 text-yellow-800'
+                                      }`}>
+                                        {agent.verdict}
+                                      </span>
+                                    </div>
+                                    {agent.reasoning && (
+                                      <div className="text-xs text-gray-600 mt-1">
+                                        {agent.reasoning}
+                                      </div>
+                                    )}
+                                    {(agent.invalid_reason || agent.uncertain_reason) && (
+                                      <div className="text-xs text-gray-500 mt-1">
+                                        Reason: {agent.invalid_reason || agent.uncertain_reason}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           
-                          <div>
-                            <div className="text-xs font-medium text-gray-700 mb-1">Key Evidence</div>
-                            <p className="text-sm text-gray-700">{citation.tier_3.key_evidence}</p>
-                          </div>
+                          {/* Legacy reasoning display for backward compatibility */}
+                          {citation.tier_3.reasoning && !citation.tier_3.consensus && (
+                            <div>
+                              <div className="text-xs font-medium text-gray-700 mb-1">Reasoning</div>
+                              <p className="text-sm text-gray-700">{citation.tier_3.reasoning}</p>
+                            </div>
+                          )}
+                          
+                          {citation.tier_3.key_evidence && !citation.tier_3.consensus && (
+                            <div>
+                              <div className="text-xs font-medium text-gray-700 mb-1">Key Evidence</div>
+                              <p className="text-sm text-gray-700">{citation.tier_3.key_evidence}</p>
+                            </div>
+                          )}
                           
                           {citation.tier_3.remaining_uncertainties && (
                             <div>

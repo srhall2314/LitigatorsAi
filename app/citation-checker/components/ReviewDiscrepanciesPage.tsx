@@ -346,57 +346,52 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                           </span>
                           
                           {/* Show Tier 3 verdict if it exists and overrides Tier 2 */}
-                          {citation.tier_3 && (
-                            citation.tier_3.verdict === "VERIFIED_REAL" || citation.tier_3.verdict === "LIKELY_REAL" ? (
-                              <>
-                                <span className="px-3 py-1 text-sm font-semibold rounded bg-green-100 text-green-800 border-2 border-green-300">
-                                  ✓ VALID (Tier 3)
-                                </span>
-                                <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
-                                  Updated by Tier 3
-                                </span>
-                                <span className={`px-2 py-1 text-xs font-medium rounded ${
-                                  consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
-                                  'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                  Tier 2: {consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" : "UNCERTAIN"}
-                                </span>
-                              </>
-                            ) : citation.tier_3.verdict === "LIKELY_FABRICATED" ? (
-                              <>
-                                <span className="px-3 py-1 text-sm font-semibold rounded bg-red-100 text-red-800 border-2 border-red-300">
-                                  INVALID (Tier 3)
-                                </span>
-                                <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
-                                  Confirmed by Tier 3
-                                </span>
-                              </>
-                            ) : citation.tier_3.verdict === "NEEDS_HUMAN_REVIEW" ? (
-                              <>
-                                <span className="px-3 py-1 text-sm font-semibold rounded bg-orange-100 text-orange-800 border-2 border-orange-300">
-                                  NEEDS REVIEW (Tier 3)
-                                </span>
-                                <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
-                                  Requires Human Review
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <span className={`px-3 py-1 text-sm font-semibold rounded ${
-                                  consensus.recommendation === "CITATION_LIKELY_VALID" ? 'bg-green-100 text-green-800' :
-                                  consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
-                                  'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                  {consensus.recommendation === "CITATION_LIKELY_VALID" ? "VALID" :
-                                   consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" :
-                                   "UNCERTAIN"}
-                                </span>
-                                <span className="px-2 py-1 text-xs font-medium rounded bg-orange-100 text-orange-800">
-                                  Tier 3: {citation.tier_3.verdict.replace(/_/g, ' ')}
-                                </span>
-                              </>
-                            )
-                          )}
+                          {citation.tier_3 && (() => {
+                            const tier3Status = getTier3FinalStatus(citation.tier_3)
+                            const tier3Consensus = citation.tier_3.consensus
+                            const validCount = tier3Consensus?.verdict_counts.VALID || 0
+                            
+                            if (tier3Status === "VALID") {
+                              return (
+                                <>
+                                  <span className="px-3 py-1 text-sm font-semibold rounded bg-green-100 text-green-800 border-2 border-green-300">
+                                    ✓ VALID (Tier 3: {validCount}/3)
+                                  </span>
+                                  <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
+                                    Updated by Tier 3
+                                  </span>
+                                  <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                    consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
+                                    'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    Tier 2: {consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" : "UNCERTAIN"}
+                                  </span>
+                                </>
+                              )
+                            } else if (tier3Status === "FAIL") {
+                              return (
+                                <>
+                                  <span className="px-3 py-1 text-sm font-semibold rounded bg-red-100 text-red-800 border-2 border-red-300">
+                                    INVALID (Tier 3: {validCount}/3)
+                                  </span>
+                                  <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
+                                    Confirmed by Tier 3
+                                  </span>
+                                </>
+                              )
+                            } else {
+                              return (
+                                <>
+                                  <span className="px-3 py-1 text-sm font-semibold rounded bg-orange-100 text-orange-800 border-2 border-orange-300">
+                                    WARN (Tier 3: {validCount}/3)
+                                  </span>
+                                  <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800">
+                                    Requires Review
+                                  </span>
+                                </>
+                              )
+                            }
+                          })()}
                           
                           {/* Default Tier 2 status if no Tier 3 */}
                           {!citation.tier_3 && (
@@ -508,22 +503,33 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                       <div className="space-y-3">
                         <div>
                           <div className="flex items-center gap-2 mb-2">
-                            <span className={`px-3 py-1 text-sm font-semibold rounded ${
-                              citation.tier_3.verdict === "VERIFIED_REAL" ? 'bg-green-100 text-green-800' :
-                              citation.tier_3.verdict === "LIKELY_REAL" ? 'bg-blue-100 text-blue-800' :
-                              citation.tier_3.verdict === "LIKELY_FABRICATED" ? 'bg-red-100 text-red-800' :
-                              citation.tier_3.verdict === "NEEDS_HUMAN_REVIEW" ? 'bg-orange-100 text-orange-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {citation.tier_3.verdict.replace(/_/g, ' ')}
-                            </span>
-                            <span className={`px-2 py-1 text-xs font-medium rounded ${
-                              citation.tier_3.confidence === "high" ? 'bg-green-100 text-green-800' :
-                              citation.tier_3.confidence === "medium" ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {citation.tier_3.confidence.toUpperCase()} Confidence
-                            </span>
+                              <span className={`px-3 py-1 text-sm font-semibold rounded ${
+                                (() => {
+                                  const tier3Status = getTier3FinalStatus(citation.tier_3)
+                                  return tier3Status === "VALID" ? 'bg-green-100 text-green-800' :
+                                         tier3Status === "FAIL" ? 'bg-red-100 text-red-800' :
+                                         'bg-orange-100 text-orange-800'
+                                })()
+                              }`}>
+                                {(() => {
+                                  const tier3Status = getTier3FinalStatus(citation.tier_3)
+                                  return tier3Status || 'UNKNOWN'
+                                })()}
+                              </span>
+                            {(() => {
+                              const tier3Consensus = citation.tier_3.consensus
+                              const confidenceScore = tier3Consensus?.confidence_score || 0
+                              
+                              return (
+                                <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                  confidenceScore >= 0.8 ? 'bg-green-100 text-green-800' :
+                                  confidenceScore >= 0.5 ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {Math.round(confidenceScore * 100)}% Confidence
+                                </span>
+                              )
+                            })()}
                           </div>
                         </div>
                         

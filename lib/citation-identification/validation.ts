@@ -5,7 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import retry from 'async-retry'
-import { Citation, CitationDocument, AgentVerdict, Consensus, CitationValidation, AgreementLevel, CitationRecommendationType, Tier3Result } from '@/types/citation-json'
+import { Citation, CitationDocument, AgentVerdict, Consensus, CitationValidation, AgreementLevel, CitationRecommendationType, Tier3Result, Tier3AgentVerdict, Tier3Consensus, Tier3FinalStatus, Tier3AgreementLevel } from '@/types/citation-json'
 import {
   getCitationAuthorityValidatorPrompt,
   getCaseEcologyValidatorPrompt,
@@ -14,7 +14,7 @@ import {
   getRealityAssessmentExpertPrompt
 } from './validation-prompts'
 import { parseAgentResponse, ParsedVerdict } from './response-parser'
-import { getTier3InvestigationPrompt, parseTier3Response } from './tier3-prompts'
+import { getTier3InvestigationPrompt, parseTier3Response, parseTier3AgentResponse } from './tier3-prompts'
 import { extractDocumentContext } from './context-extractor'
 
 // Agent configurations
@@ -286,16 +286,18 @@ export async function validateCitationWithPanel(
 }
 
 /**
- * Perform Tier 3 investigation for a citation with retry logic
+ * Call a single Tier 3 agent with retry logic
  */
-export async function validateCitationTier3(
+async function callTier3Agent(
+  agentNumber: number,
   citation: Citation,
   context: string,
   tier2Results: CitationValidation,
   apiKey: string
-): Promise<Tier3Result> {
+): Promise<Tier3AgentVerdict> {
   const anthropic = new Anthropic({ apiKey })
   const prompt = getTier3InvestigationPrompt(citation, context, tier2Results)
+  const agentName = `tier3_agent_${agentNumber}`
   
   try {
     const message = await retry(
@@ -325,7 +327,7 @@ export async function validateCitationTier3(
         ...RETRY_CONFIG,
         onRetry: (error: Error, attempt: number) => {
           console.warn(
-            `[Tier3] Retrying citation ${citation.id} investigation (attempt ${attempt}/${RETRY_CONFIG.retries + 1}):`,
+            `[Tier3] Retrying agent ${agentName} (attempt ${attempt}/${RETRY_CONFIG.retries + 1}):`,
             error instanceof Error ? error.message : String(error)
           )
         },
@@ -339,20 +341,179 @@ export async function validateCitationTier3(
       .join('\n')
     
     // Parse response
-    const parsed = parseTier3Response(responseText)
+    const parsed = parseTier3AgentResponse(responseText, agentName)
     
-    // Build Tier 3 result
-    const result: Tier3Result = {
+    // Build agent verdict
+    const verdict: Tier3AgentVerdict = {
+      agent: agentName,
       verdict: parsed.verdict,
       reasoning: parsed.reasoning,
-      key_evidence: parsed.key_evidence,
-      confidence: parsed.confidence,
       timestamp: new Date().toISOString(),
       model: TIER3_MODEL,
     }
     
-    if (parsed.remaining_uncertainties) {
-      result.remaining_uncertainties = parsed.remaining_uncertainties
+    if (parsed.invalid_reason) {
+      verdict.invalid_reason = parsed.invalid_reason
+    }
+    if (parsed.uncertain_reason) {
+      verdict.uncertain_reason = parsed.uncertain_reason
+    }
+    
+    return verdict
+  } catch (error) {
+    console.error(`[Tier3] Error calling agent ${agentName} after retries:`, error)
+    
+    // Return UNCERTAIN verdict on error after retries exhausted
+    return {
+      agent: agentName,
+      verdict: 'UNCERTAIN',
+      uncertain_reason: 'api_error',
+      reasoning: `Error occurred during Tier 3 investigation: ${error instanceof Error ? error.message : String(error)}`,
+      timestamp: new Date().toISOString(),
+      model: TIER3_MODEL,
+    }
+  }
+}
+
+/**
+ * Helper function to get Tier 3 final status from old format (backward compatibility)
+ */
+export function getTier3FinalStatus(tier3Result: Tier3Result | null | undefined): Tier3FinalStatus | null {
+  if (!tier3Result) {
+    return null
+  }
+  
+  // New format: use consensus.final_status
+  if (tier3Result.consensus?.final_status) {
+    return tier3Result.consensus.final_status
+  }
+  
+  // Old format: map legacy verdict to new status
+  if (tier3Result.verdict) {
+    if (tier3Result.verdict === 'VERIFIED_REAL' || tier3Result.verdict === 'LIKELY_REAL') {
+      return 'VALID'
+    } else if (tier3Result.verdict === 'NEEDS_HUMAN_REVIEW') {
+      return 'WARN'
+    } else if (tier3Result.verdict === 'LIKELY_FABRICATED') {
+      return 'FAIL'
+    }
+  }
+  
+  // Default to WARN if we can't determine
+  return 'WARN'
+}
+
+/**
+ * Calculate Tier 3 consensus from 3-agent panel evaluations
+ */
+export function calculateTier3Consensus(panelEvaluations: Tier3AgentVerdict[]): Tier3Consensus {
+  // Count verdicts
+  const verdict_counts = {
+    VALID: 0,
+    INVALID: 0,
+    UNCERTAIN: 0,
+  }
+  
+  for (const eval_ of panelEvaluations) {
+    verdict_counts[eval_.verdict]++
+  }
+  
+  // Determine final_status based on VALID count:
+  // - VALID if 3 VALID votes (3/3)
+  // - WARN if 2 VALID votes (2/3)
+  // - FAIL if <2 VALID votes
+  let final_status: Tier3FinalStatus
+  if (verdict_counts.VALID === 3) {
+    final_status = 'VALID'
+  } else if (verdict_counts.VALID === 2) {
+    final_status = 'WARN'
+  } else {
+    final_status = 'FAIL'
+  }
+  
+  // Determine agreement level
+  const maxCount = Math.max(verdict_counts.VALID, verdict_counts.INVALID, verdict_counts.UNCERTAIN)
+  let agreement_level: Tier3AgreementLevel
+  if (maxCount === 3) {
+    agreement_level = 'unanimous'
+  } else if (maxCount === 2) {
+    agreement_level = 'majority'
+  } else {
+    agreement_level = 'split'
+  }
+  
+  // Calculate confidence score: maxCount / 3
+  const confidence_score = maxCount / 3
+  
+  // Generate reasoning
+  let reasoning = `Panel consensus: ${verdict_counts.VALID} valid, ${verdict_counts.INVALID} invalid, ${verdict_counts.UNCERTAIN} uncertain. `
+  
+  if (final_status === 'VALID') {
+    reasoning += 'All three agents found the citation to be valid.'
+  } else if (final_status === 'WARN') {
+    reasoning += 'Two agents found the citation valid, but one agent raised concerns.'
+  } else {
+    reasoning += 'Less than two agents found the citation valid, indicating potential issues.'
+  }
+  
+  // Add specific agent concerns to reasoning
+  const concerns: string[] = []
+  for (const eval_ of panelEvaluations) {
+    if (eval_.verdict === 'INVALID' && eval_.invalid_reason) {
+      concerns.push(`${eval_.agent}: ${eval_.invalid_reason}`)
+    } else if (eval_.verdict === 'UNCERTAIN' && eval_.uncertain_reason) {
+      concerns.push(`${eval_.agent}: ${eval_.uncertain_reason}`)
+    }
+  }
+  
+  if (concerns.length > 0) {
+    reasoning += ` Concerns: ${concerns.join('; ')}.`
+  }
+  
+  return {
+    agreement_level,
+    verdict_counts,
+    final_status,
+    confidence_score,
+    reasoning,
+  }
+}
+
+/**
+ * Perform Tier 3 investigation for a citation with 3-agent panel
+ */
+export async function validateCitationTier3(
+  citation: Citation,
+  context: string,
+  tier2Results: CitationValidation,
+  apiKey: string
+): Promise<Tier3Result> {
+  try {
+    // Call all 3 agents in parallel
+    const agentPromises = [1, 2, 3].map(agentNum =>
+      callTier3Agent(agentNum, citation, context, tier2Results, apiKey)
+    )
+    
+    const panelEvaluations = await Promise.all(agentPromises)
+    
+    // Calculate consensus
+    const consensus = calculateTier3Consensus(panelEvaluations)
+    
+    // Aggregate reasoning and evidence from panel
+    const allReasoning = panelEvaluations.map(e => e.reasoning || '').filter(r => r.length > 0)
+    const aggregatedReasoning = allReasoning.length > 0 
+      ? allReasoning.join(' ') 
+      : consensus.reasoning
+    
+    // Build Tier 3 result
+    const result: Tier3Result = {
+      panel_evaluation: panelEvaluations,
+      consensus,
+      // Legacy fields for backward compatibility
+      reasoning: aggregatedReasoning,
+      key_evidence: consensus.reasoning,
+      timestamp: new Date().toISOString(),
+      model: TIER3_MODEL,
     }
     
     return result
@@ -363,12 +524,40 @@ export async function validateCitationTier3(
       console.error(`[Tier3] Error stack: ${error.stack}`)
     }
     
-    // Return uncertain result on error after retries exhausted
+    // Return fail result on error after retries exhausted
+    // Create error panel evaluation
+    const errorPanel: Tier3AgentVerdict[] = [
+      {
+        agent: 'tier3_agent_error',
+        verdict: 'UNCERTAIN',
+        uncertain_reason: 'api_error',
+        reasoning: `Error occurred during Tier 3 investigation: ${error instanceof Error ? error.message : String(error)}`,
+        timestamp: new Date().toISOString(),
+        model: TIER3_MODEL,
+      },
+      {
+        agent: 'tier3_agent_error',
+        verdict: 'UNCERTAIN',
+        uncertain_reason: 'api_error',
+        reasoning: 'Investigation could not be completed due to technical error',
+        timestamp: new Date().toISOString(),
+        model: TIER3_MODEL,
+      },
+      {
+        agent: 'tier3_agent_error',
+        verdict: 'UNCERTAIN',
+        uncertain_reason: 'api_error',
+        reasoning: 'Investigation could not be completed due to technical error',
+        timestamp: new Date().toISOString(),
+        model: TIER3_MODEL,
+      },
+    ]
+    
     return {
-      verdict: 'NEEDS_HUMAN_REVIEW',
+      panel_evaluation: errorPanel,
+      consensus: calculateTier3Consensus(errorPanel),
       reasoning: `Error occurred during Tier 3 investigation: ${error instanceof Error ? error.message : String(error)}`,
       key_evidence: 'Investigation could not be completed due to technical error',
-      confidence: 'low',
       timestamp: new Date().toISOString(),
       model: TIER3_MODEL,
     }

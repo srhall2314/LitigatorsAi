@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { CitationDocument, Citation, CitationValidation, AnalysisStatistics, Tier3Verdict, ValidationVerdict, AgreementLevel } from "@/types/citation-json"
+import { CitationDocument, Citation, CitationValidation, AnalysisStatistics, Tier3Verdict, Tier3FinalStatus, ValidationVerdict, AgreementLevel } from "@/types/citation-json"
+import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 
 export async function GET(request: NextRequest) {
   try {
@@ -51,6 +52,11 @@ export async function GET(request: NextRequest) {
         tier3WithUnanimousTier2: 0,
         tier3WithUnanimousTier2Rate: 0,
         verdicts: {
+          VALID: 0,
+          WARN: 0,
+          FAIL: 0,
+        },
+        legacyVerdicts: {
           VERIFIED_REAL: 0,
           LIKELY_REAL: 0,
           LIKELY_FABRICATED: 0,
@@ -170,10 +176,9 @@ export async function GET(request: NextRequest) {
             // Count invalid citations
             // Invalid if: Tier 3 verdict is LIKELY_FABRICATED or NEEDS_HUMAN_REVIEW
             // OR if Tier 2 consensus flagged it but no Tier 3 yet (shouldn't happen if completed)
-            if (hasTier3 && citation.tier_3 && (
-              citation.tier_3.verdict === 'LIKELY_FABRICATED' || 
-              citation.tier_3.verdict === 'NEEDS_HUMAN_REVIEW'
-            )) {
+            if (hasTier3 && citation.tier_3) {
+              const tier3Status = getTier3FinalStatus(citation.tier_3)
+              if (tier3Status === 'FAIL' || tier3Status === 'WARN') {
               documentInvalidCount++
             }
 
@@ -189,9 +194,10 @@ export async function GET(request: NextRequest) {
               documentTier3RunsCount++
             }
 
-            // Count Tier 3 validated citations - citations where Tier 3 verdict is VERIFIED_REAL or LIKELY_REAL
+            // Count Tier 3 validated citations - citations where Tier 3 final_status is VALID
             if (hasTier3 && citation.tier_3) {
-              if (citation.tier_3.verdict === 'VERIFIED_REAL' || citation.tier_3.verdict === 'LIKELY_REAL') {
+              const tier3Status = getTier3FinalStatus(citation.tier_3)
+              if (tier3Status === 'VALID') {
                 documentTier3ValidatedCount++
               }
             }
@@ -340,14 +346,25 @@ export async function GET(request: NextRequest) {
               }
             }
             
-            // Track Tier 3 verdicts
-            const verdict = citation.tier_3.verdict
-            if (verdict && stats.tier3Validation.verdicts[verdict] !== undefined) {
-              stats.tier3Validation.verdicts[verdict]++
+            // Track Tier 3 verdicts (new format)
+            const tier3Status = getTier3FinalStatus(citation.tier_3)
+            if (tier3Status && stats.tier3Validation.verdicts[tier3Status] !== undefined) {
+              stats.tier3Validation.verdicts[tier3Status]++
+            }
+            
+            // Track legacy verdicts for backward compatibility
+            if (citation.tier_3.verdict && stats.tier3Validation.legacyVerdicts) {
+              const legacyVerdict = citation.tier_3.verdict as Tier3Verdict
+              if (stats.tier3Validation.legacyVerdicts[legacyVerdict] !== undefined) {
+                stats.tier3Validation.legacyVerdicts[legacyVerdict]++
+              }
             }
 
-            // Track Tier 3 confidence (convert to numeric for averaging)
-            if (citation.tier_3.confidence) {
+            // Track Tier 3 confidence (use consensus confidence_score if available, otherwise legacy confidence)
+            if (citation.tier_3.consensus?.confidence_score !== undefined) {
+              totalTier3Confidence += citation.tier_3.consensus.confidence_score
+              tier3ConfidenceCount++
+            } else if (citation.tier_3.confidence) {
               const confidenceMap: Record<string, number> = { high: 0.8, medium: 0.5, low: 0.2 }
               const numericConfidence = confidenceMap[citation.tier_3.confidence] || 0
               totalTier3Confidence += numericConfidence
@@ -422,7 +439,7 @@ export async function GET(request: NextRequest) {
         tier2Unanimous5of5Percentage: tier2Unanimous5of5Percentage,
         tier2Validated: tier2ValidatedInCompleteDocuments,
         tier3Runs: tier3RunsInCompleteDocuments,
-        tier3Validated: tier3ValidatedInCompleteDocuments,
+        tier3Validated: tier3ValidatedInCompleteDocuments, // Counts citations with final_status === "VALID"
         tier2ValidVoteDistribution: validVoteDistributionInComplete,
       },
     }

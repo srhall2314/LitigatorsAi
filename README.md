@@ -30,6 +30,7 @@ Fill in your environment variables:
 - `NEXTAUTH_SECRET` - Generate with `openssl rand -base64 32`
 - `NEXTAUTH_URL` - Your app URL (http://localhost:3000 for local dev)
 - `BLOB_READ_WRITE_TOKEN` - Your Vercel Blob Storage token
+- `ANTHROPIC_API_KEY` - Your Anthropic API key (required for citation validation)
 - Auth provider credentials (optional)
 
 3. Set up the database:
@@ -82,6 +83,7 @@ This project is configured for Vercel deployment. Make sure to:
    - `NEXTAUTH_SECRET` - Your NextAuth secret
    - `NEXTAUTH_URL` - Your production URL (e.g., https://your-app.vercel.app)
    - `BLOB_READ_WRITE_TOKEN` - Your Vercel Blob Storage token
+   - `ANTHROPIC_API_KEY` - Your Anthropic API key (required for citation validation)
    - `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1` - Set to "1" to avoid Prisma checksum errors during build
 
 2. **Run database migrations:**
