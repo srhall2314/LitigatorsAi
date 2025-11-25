@@ -225,9 +225,9 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
   // Helper function to get Tier 3 agent display name
   const getTier3AgentDisplayName = (agentName: string) => {
     const names: Record<string, string> = {
-      'tier3_rigorous_legal_investigator_v1': 'Rigorous Legal Investigator',
-      'tier3_holistic_legal_analyst_v1': 'Holistic Legal Analyst',
-      'tier3_pattern_recognition_expert_v1': 'Pattern Recognition Expert',
+      'tier3_rigorous_legal_investigator_v1': 'Senior Litigator Reviewer (20+ Years)',
+      'tier3_holistic_legal_analyst_v1': 'Specialist Legal Researcher',
+      'tier3_pattern_recognition_expert_v1': 'Appellate Clerk / Judicial Reviewer',
     }
     return names[agentName] || agentName
   }

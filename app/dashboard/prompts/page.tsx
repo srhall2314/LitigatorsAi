@@ -131,18 +131,18 @@ export default async function PromptsPage() {
   // Generate Tier 3 prompts (all 3 agents)
   const tier3Prompts = [
     {
-      name: "Agent 1: Rigorous Legal Investigator",
-      style: "Conservative, detail-oriented investigator with deep knowledge of legal citation systems",
+      name: "Agent 1: Senior Litigator Reviewer (20+ Years)",
+      style: "Litigator with over 20 years of experience reviewing a colleague's draft filing. Focus: Practical, structural, and doctrinal soundness.",
       prompt: getRigorousLegalInvestigatorPrompt(exampleCitation, exampleContext, exampleTier2Results)
     },
     {
-      name: "Agent 2: Holistic Legal Analyst",
-      style: "Big-picture thinker who synthesizes multiple signals and considers Tier 2 panel context",
+      name: "Agent 2: Specialist Legal Researcher",
+      style: "Exceptionally strong legal researcher (think senior law librarian / research attorney). Focus: Citation correctness and research discipline.",
       prompt: getHolisticLegalAnalystPrompt(exampleCitation, exampleContext, exampleTier2Results)
     },
     {
-      name: "Agent 3: Pattern Recognition Expert",
-      style: "Expert at detecting fabrication patterns and authenticity markers",
+      name: "Agent 3: Appellate Clerk / Judicial Reviewer",
+      style: "Thinks like an appellate clerk or judge's law clerk reviewing a brief. Focus: Overall authenticity, fit in real judicial practice.",
       prompt: getPatternRecognitionExpertPrompt(exampleCitation, exampleContext, exampleTier2Results)
     }
   ]
