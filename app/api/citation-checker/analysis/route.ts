@@ -179,7 +179,8 @@ export async function GET(request: NextRequest) {
             if (hasTier3 && citation.tier_3) {
               const tier3Status = getTier3FinalStatus(citation.tier_3)
               if (tier3Status === 'FAIL' || tier3Status === 'WARN') {
-              documentInvalidCount++
+                documentInvalidCount++
+              }
             }
 
             // Count Tier 2 validated citations - citations where consensus recommendation is CITATION_LIKELY_VALID
