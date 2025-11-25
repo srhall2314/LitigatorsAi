@@ -29,6 +29,15 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
     tier3Current: number
     tier3Total: number
     stage: 'idle' | 'tier2' | 'tier3' | 'complete'
+    tier2Pending?: number
+    tier2Processing?: number
+    tier2Completed?: number
+    tier2Failed?: number
+    tier3Pending?: number
+    tier3Processing?: number
+    tier3Completed?: number
+    tier3Failed?: number
+    jobStatus?: string
   }>({
     tier2Current: 0,
     tier2Total: 0,
@@ -197,6 +206,15 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
           tier3Current: job.tier3Progress.current,
           tier3Total: job.tier3Progress.total,
           stage: job.tier2Progress.current < job.tier2Progress.total ? 'tier2' : 'tier3',
+          tier2Pending: job.tier2Progress.pending,
+          tier2Processing: job.tier2Progress.processing,
+          tier2Completed: job.tier2Progress.completed,
+          tier2Failed: job.tier2Progress.failed,
+          tier3Pending: job.tier3Progress.pending,
+          tier3Processing: job.tier3Progress.processing,
+          tier3Completed: job.tier3Progress.completed,
+          tier3Failed: job.tier3Progress.failed,
+          jobStatus: job.status,
         })
         
         if (job.status === 'completed') {
@@ -288,7 +306,9 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
       {/* Progress Indicator */}
       {validating && progress.stage !== 'idle' && (
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">Validation Progress</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">
+            Validation Progress {progress.jobStatus && `(${progress.jobStatus})`}
+          </h3>
           
           {/* Tier 2 Progress */}
           <div className="mb-4">
@@ -311,6 +331,23 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
                 }}
               />
             </div>
+            {/* Queue Status Breakdown */}
+            {(progress.tier2Pending !== undefined || progress.tier2Processing !== undefined || progress.tier2Failed !== undefined) && (
+              <div className="mt-2 flex gap-4 text-xs text-gray-600">
+                {progress.tier2Pending !== undefined && progress.tier2Pending > 0 && (
+                  <span>Pending: {progress.tier2Pending}</span>
+                )}
+                {progress.tier2Processing !== undefined && progress.tier2Processing > 0 && (
+                  <span className="text-blue-600 font-medium">Processing: {progress.tier2Processing}</span>
+                )}
+                {progress.tier2Completed !== undefined && progress.tier2Completed > 0 && (
+                  <span className="text-green-600">Completed: {progress.tier2Completed}</span>
+                )}
+                {progress.tier2Failed !== undefined && progress.tier2Failed > 0 && (
+                  <span className="text-red-600">Failed: {progress.tier2Failed}</span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tier 3 Progress */}
@@ -335,6 +372,23 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
                   }}
                 />
               </div>
+              {/* Queue Status Breakdown */}
+              {(progress.tier3Pending !== undefined || progress.tier3Processing !== undefined || progress.tier3Failed !== undefined) && (
+                <div className="mt-2 flex gap-4 text-xs text-gray-600">
+                  {progress.tier3Pending !== undefined && progress.tier3Pending > 0 && (
+                    <span>Pending: {progress.tier3Pending}</span>
+                  )}
+                  {progress.tier3Processing !== undefined && progress.tier3Processing > 0 && (
+                    <span className="text-blue-600 font-medium">Processing: {progress.tier3Processing}</span>
+                  )}
+                  {progress.tier3Completed !== undefined && progress.tier3Completed > 0 && (
+                    <span className="text-green-600">Completed: {progress.tier3Completed}</span>
+                  )}
+                  {progress.tier3Failed !== undefined && progress.tier3Failed > 0 && (
+                    <span className="text-red-600">Failed: {progress.tier3Failed}</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
