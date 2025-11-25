@@ -93,9 +93,50 @@ model CitationCheck {
   
   fileUpload    FileUpload @relation(fields: [fileUploadId], references: [id], onDelete: Cascade)
   user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  validationJob ValidationJob?
   
   @@unique([fileUploadId, version])
   @@index([userId])
   @@index([fileUploadId])
+}
+
+model ValidationJob {
+  id            String   @id @default(uuid())
+  checkId      String   @unique
+  status        String   @default("pending") // pending, processing, completed, failed
+  tier2Total    Int
+  tier2Completed Int    @default(0)
+  tier3Total    Int     @default(0)
+  tier3Completed Int    @default(0)
+  error         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  check         CitationCheck @relation(fields: [checkId], references: [id], onDelete: Cascade)
+  queueItems    ValidationQueueItem[]
+  
+  @@index([status])
+  @@index([checkId])
+}
+
+model ValidationQueueItem {
+  id            String   @id @default(uuid())
+  jobId         String
+  citationId    String   // Citation ID from jsonData
+  citationIndex Int      // Index in citations array
+  tier          String   @default("tier2") // tier2 or tier3
+  status        String   @default("pending") // pending, processing, completed, failed
+  retryCount    Int      @default(0)
+  error         String?
+  result        Json?    // Store validation result
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  processedAt   DateTime?
+  
+  job           ValidationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  
+  @@unique([jobId, citationId, tier])
+  @@index([jobId, status])
+  @@index([status])
 }
 

@@ -10,7 +10,11 @@ import {
   getLegalKnowledgeValidatorPrompt,
   getRealityAssessmentExpertPrompt
 } from "@/lib/citation-identification/validation-prompts"
-import { getTier3InvestigationPrompt } from "@/lib/citation-identification/tier3-prompts"
+import { 
+  getRigorousLegalInvestigatorPrompt,
+  getHolisticLegalAnalystPrompt,
+  getPatternRecognitionExpertPrompt
+} from "@/lib/citation-identification/tier3-prompts"
 import { Citation, CitationValidation } from "@/types/citation-json"
 
 export default async function PromptsPage() {
@@ -124,7 +128,24 @@ export default async function PromptsPage() {
     }
   }
 
-  const tier3Prompt = getTier3InvestigationPrompt(exampleCitation, exampleContext, exampleTier2Results)
+  // Generate Tier 3 prompts (all 3 agents)
+  const tier3Prompts = [
+    {
+      name: "Agent 1: Rigorous Legal Investigator",
+      style: "Conservative, detail-oriented investigator with deep knowledge of legal citation systems",
+      prompt: getRigorousLegalInvestigatorPrompt(exampleCitation, exampleContext, exampleTier2Results)
+    },
+    {
+      name: "Agent 2: Holistic Legal Analyst",
+      style: "Big-picture thinker who synthesizes multiple signals and considers Tier 2 panel context",
+      prompt: getHolisticLegalAnalystPrompt(exampleCitation, exampleContext, exampleTier2Results)
+    },
+    {
+      name: "Agent 3: Pattern Recognition Expert",
+      style: "Expert at detecting fabrication patterns and authenticity markers",
+      prompt: getPatternRecognitionExpertPrompt(exampleCitation, exampleContext, exampleTier2Results)
+    }
+  ]
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -181,32 +202,38 @@ export default async function PromptsPage() {
             </div>
           </div>
 
-          {/* Tier 3 Prompt */}
+          {/* Tier 3 Prompts */}
           <div className="mb-12">
             <h2 className="text-3xl font-semibold text-black mb-6 border-b border-gray-300 pb-2">
-              Tier 3 Investigation Prompt
+              Tier 3 Investigation Prompts
             </h2>
             <p className="text-black mb-6">
               <strong>Model:</strong> Claude Sonnet 4.5 (<code className="bg-gray-100 px-2 py-1 rounded">claude-sonnet-4-5-20250929</code>)
             </p>
             <p className="text-black mb-6">
-              Used for citations that receive split decisions (3/2 or worse) from the Tier 2 panel.
+              These 3 agents investigate citations comprehensively in parallel. Unlike Tier 2 (where agents focus on specific dimensions), 
+              Tier 3 agents all investigate the FULL citation but with different analytical backgrounds/styles. Used for citations that 
+              receive split decisions (3/2 or worse) from the Tier 2 panel.
             </p>
 
-            <div className="border border-gray-300 rounded-lg p-6 bg-white">
-              <div className="mb-4">
-                <h3 className="text-2xl font-semibold text-black mb-2">
-                  Citation Investigation Specialist
-                </h3>
-                <p className="text-gray-700 italic">
-                  <strong>Focus:</strong> Deep investigation of citations that failed Tier 2 consensus
-                </p>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded p-4 overflow-x-auto">
-                <pre className="whitespace-pre-wrap text-sm text-black font-mono">
-                  {tier3Prompt}
-                </pre>
-              </div>
+            <div className="space-y-8">
+              {tier3Prompts.map((agent, index) => (
+                <div key={index} className="border border-gray-300 rounded-lg p-6 bg-white">
+                  <div className="mb-4">
+                    <h3 className="text-2xl font-semibold text-black mb-2">
+                      {agent.name}
+                    </h3>
+                    <p className="text-gray-700 italic">
+                      <strong>Analytical Style:</strong> {agent.style}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded p-4 overflow-x-auto">
+                    <pre className="whitespace-pre-wrap text-sm text-black font-mono">
+                      {agent.prompt}
+                    </pre>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 

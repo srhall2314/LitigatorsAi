@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { CitationList } from "./CitationList"
 import { ContextPanel } from "./ContextPanel"
@@ -36,6 +36,7 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
     tier3Total: 0,
     stage: 'idle'
   })
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   // Load citations from check data
   useEffect(() => {
@@ -105,104 +106,22 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
     })
 
     try {
-      // Use EventSource for streaming progress updates (GET request)
-      const eventSource = new EventSource(`/api/citation-checker/checks/${checkId}/validate-citations?stream=true`)
+      // Start validation job
+      const response = await fetch(`/api/citation-checker/checks/${checkId}/validate-citations`, {
+        method: 'POST',
+      })
       
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          console.log('[Progress] Received:', data.type, data)
-          
-          // Check for error messages (with or without type field)
-          if (data.error || data.type === "error") {
-            alert(`Failed to validate citations: ${data.error || "Unknown error"}`)
-            eventSource.close()
-            setValidating(false)
-            return
-          }
-          
-          if (data.type === "start") {
-            setProgress(prev => ({
-              ...prev,
-              tier2Total: data.tier2Total || 0,
-              tier3Total: data.tier3Total || 0,
-              stage: 'tier2'
-            }))
-          } else if (data.type === "tier2_progress") {
-            setProgress(prev => ({
-              ...prev,
-              tier2Current: data.tier2Current || data.current || 0,
-              tier2Total: data.tier2Total || data.total || prev.tier2Total,
-              stage: 'tier2'
-            }))
-          } else if (data.type === "tier2_complete") {
-            setProgress(prev => ({
-              ...prev,
-              tier2Current: prev.tier2Total,
-              tier3Total: data.tier3Count || 0,
-              stage: data.tier3Count > 0 ? 'tier3' : 'complete'
-            }))
-          } else if (data.type === "tier3_progress") {
-            setProgress(prev => ({
-              ...prev,
-              tier2Current: data.tier2Current || prev.tier2Total,
-              tier2Total: data.tier2Total || prev.tier2Total,
-              tier3Current: data.tier3Current || 0,
-              tier3Total: data.tier3Total || prev.tier3Total,
-              stage: 'tier3'
-            }))
-          } else if (data.type === "complete") {
-            // Update checkId if a new version was created
-            if (data.checkId) {
-              setCheckId(data.checkId)
-            }
-            
-            // Reload citations with validation data
-            if (data.jsonData?.document?.citations) {
-              setCitations(data.jsonData.document.citations)
-              
-              // Calculate results
-              const validatedCitations = data.jsonData.document.citations.filter((c: any) => c.validation)
-              const valid = validatedCitations.filter((c: any) => 
-                c.validation.consensus.recommendation === "CITATION_LIKELY_VALID"
-              ).length
-              const invalid = validatedCitations.filter((c: any) => 
-                c.validation.consensus.recommendation === "CITATION_LIKELY_HALLUCINATED"
-              ).length
-              const uncertain = validatedCitations.filter((c: any) => 
-                c.validation.consensus.recommendation === "CITATION_UNCERTAIN"
-              ).length
-              
-              setResults({
-                valid,
-                invalid,
-                uncertain,
-                total: validatedCitations.length
-              })
-            }
-            
-            setProgress(prev => ({
-              ...prev,
-              stage: 'complete'
-            }))
-            
-            eventSource.close()
-            setValidating(false)
-          } else if (data.type === "error") {
-            alert(`Failed to validate citations: ${data.error || "Unknown error"}`)
-            eventSource.close()
-            setValidating(false)
-          }
-        } catch (err) {
-          console.error("Error parsing progress update:", err)
-        }
-      }
+      const data = await response.json()
       
-      eventSource.onerror = (error) => {
-        console.error("EventSource error:", error)
-        eventSource.close()
+      if (data.jobId) {
+        // Start polling for status
+        startPolling(data.jobId)
+      } else if (data.error) {
+        alert(`Failed to create validation job: ${data.error}`)
         setValidating(false)
-        alert("Connection error during validation. Please try again.")
+      } else {
+        alert('Failed to create validation job')
+        setValidating(false)
       }
     } catch (error) {
       console.error("Validation error:", error)
@@ -210,6 +129,110 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
       setValidating(false)
     }
   }
+
+  const startPolling = (jobId: string) => {
+    // Clear any existing polling interval
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+    }
+    
+    const loadData = async () => {
+      try {
+        const fileRes = await fetch(`/api/citation-checker/files`)
+        if (fileRes.ok) {
+          const files = await fileRes.json()
+          const file = files.find((f: any) => f.id === fileId)
+          if (file?.citationChecks?.[0]) {
+            const currentCheckId = file.citationChecks[0].id
+            setCheckId(currentCheckId)
+            const checkRes = await fetch(`/api/citation-checker/checks/${currentCheckId}`)
+            if (checkRes.ok) {
+              const check = await checkRes.json()
+              const jsonData = check.jsonData as any
+              if (jsonData?.document?.citations) {
+                setCitations(jsonData.document.citations)
+                
+                // Calculate results
+                const validatedCitations = jsonData.document.citations.filter((c: any) => c.validation)
+                if (validatedCitations.length > 0) {
+                  const valid = validatedCitations.filter((c: any) => 
+                    c.validation?.consensus?.recommendation === "CITATION_LIKELY_VALID"
+                  ).length
+                  const invalid = validatedCitations.filter((c: any) => 
+                    c.validation?.consensus?.recommendation === "CITATION_LIKELY_HALLUCINATED"
+                  ).length
+                  const uncertain = validatedCitations.filter((c: any) => 
+                    c.validation?.consensus?.recommendation === "CITATION_UNCERTAIN"
+                  ).length
+                  
+                  setResults({
+                    valid,
+                    invalid,
+                    uncertain,
+                    total: validatedCitations.length
+                  })
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error loading data:", error)
+      }
+    }
+    
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/citation-checker/jobs/${jobId}`)
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch job status: ${response.statusText}`)
+        }
+        
+        const job = await response.json()
+        
+        setProgress({
+          tier2Current: job.tier2Progress.current,
+          tier2Total: job.tier2Progress.total,
+          tier3Current: job.tier3Progress.current,
+          tier3Total: job.tier3Progress.total,
+          stage: job.tier2Progress.current < job.tier2Progress.total ? 'tier2' : 'tier3',
+        })
+        
+        if (job.status === 'completed') {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current)
+            pollIntervalRef.current = null
+          }
+          setValidating(false)
+          loadData()
+        } else if (job.status === 'failed') {
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current)
+            pollIntervalRef.current = null
+          }
+          setValidating(false)
+          alert(`Validation failed: ${job.error || 'Unknown error'}`)
+        }
+      } catch (error) {
+        console.error('Error polling job status:', error)
+        // Don't stop polling on error - might be temporary network issue
+      }
+    }
+    
+    // Start polling immediately, then every 2 seconds
+    poll()
+    pollIntervalRef.current = setInterval(poll, 2000)
+  }
+  
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+      }
+    }
+  }, [])
 
   // Helper function to get color for verdict
   const getVerdictColor = (verdict: ValidationVerdict) => {

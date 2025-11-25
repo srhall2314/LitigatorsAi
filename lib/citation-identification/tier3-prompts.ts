@@ -222,7 +222,12 @@ export function parseTier3AgentResponse(responseText: string, agentName: string)
   }
 }
 
-export function getTier3InvestigationPrompt(
+/**
+ * Agent 1: Rigorous Legal Investigator
+ * Analytical Style: Conservative, detail-oriented investigator with deep knowledge of legal citation systems
+ * All agents investigate the FULL citation comprehensively - this agent emphasizes structural accuracy and methodical verification
+ */
+export function getRigorousLegalInvestigatorPrompt(
   citation: Citation,
   context: string,
   tier2Results: CitationValidation
@@ -242,8 +247,10 @@ export function getTier3InvestigationPrompt(
     return verdictStr
   }).join('\n- ')
 
-  return `You are a citation investigation specialist. You are examining a citation that 
-received conflicting assessments from a panel of five validators.
+  return `You are a rigorous legal investigator with deep knowledge of legal citation systems. 
+You approach investigations conservatively and methodically, emphasizing structural accuracy 
+and thorough verification. You are examining a citation that received conflicting assessments 
+from a panel of five validators.
 
 Citation: ${citationText}
 Citation Type: ${citationType}
@@ -257,70 +264,313 @@ Tier 2 Panel Results:
 - Panel Reasoning: ${tier2Results.consensus.reasoning}
 
 Your Task:
-Using everything you know about law, courts, reporters, statutes, case law, and 
-legal practices, investigate this citation thoroughly. Your goal is to determine 
-with high confidence whether this citation is real or fabricated.
+Investigate this citation comprehensively and thoroughly. As a rigorous investigator, you 
+examine ALL aspects methodically: authority existence, metadata accuracy, temporal consistency, 
+context fit, and fabrication markers. You are cautious and detail-oriented, checking every 
+element carefully before making your assessment.
 
-Investigation Steps:
+Investigate ALL of these areas thoroughly:
 
 1. AUTHORITY VERIFICATION
    - Is this court/reporter/statute combination credible?
    - Would this authority realistically exist at this time?
-   - Are there any red flags in the metadata?
+   - Are there any red flags in the metadata (volumes, pages, years)?
 
 2. EXISTENCE ASSESSMENT
    - Based on your knowledge, does this specific citation likely exist?
    - Have you encountered this citation or similar ones?
    - Is there any indication this is a known, real authority?
 
-3. CONTEXT ANALYSIS
+3. TEMPORAL CONSISTENCY
+   - Do the dates and timeline make sense?
+   - Would this citation exist at this point in legal history?
+   - Are there temporal inconsistencies?
+
+4. CONTEXT ANALYSIS
    - Does the citation fit the legal argument presented? (Note: A good fit is EXPECTED and POSITIVE - lawyers cite authorities that support their arguments. Do NOT treat a perfect fit as suspicious on its own.)
    - Would a lawyer realistically cite this authority for this proposition?
-   - Only flag fabrication concerns if there are OTHER red flags (generic names, unknown case, fabrication markers, etc.) BEYOND just a good fit. A citation that "serves the exact legal proposition needed" is what legitimate citations do - this is not a red flag.
+   - Only flag fabrication concerns if there are OTHER red flags BEYOND just a good fit.
 
-4. RECONCILE TIER 2 DISAGREEMENT
-   - Where did the panel disagree?
+5. FABRICATION MARKERS
+   - Are there patterns suggesting AI invention?
+   - Do you see suspiciously convenient details?
+   - Are there markers of fabrication vs. real citations?
+
+6. TIER 2 RECONCILIATION
+   - Where did the Tier 2 panel disagree?
    - Which agents were correct, and why?
    - What did they miss or misinterpret?
 
-5. FABRICATION LIKELIHOOD
-   - If this is fabricated, what would make it fabricated?
-   - If this is real, what makes it credible despite uncertainty?
-   - Are there specific hallucination markers present?
-
-Provide Your Assessment:
+Your analytical style emphasizes methodical verification and structural accuracy. Be thorough 
+and conservative in your assessment.
 
 Respond with EXACTLY one of:
 - VALID: Citation appears to be real and legitimate. No significant issues detected.
 - INVALID: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
 - UNCERTAIN: Citation may be real but has issues requiring review, or insufficient information to determine validity.
 
-Use VALID when:
-- Citation structure is correct and credible
-- No red flags or fabrication markers detected
-- Citation appears legitimate based on your knowledge
+If INVALID, you MUST use one of these exact reason codes:
+- structural_impossibility
+- metadata_inconsistent
+- authority_nonexistent
+- fabrication_clear
+- multiple_red_flags
 
-Use INVALID when:
-- Clear evidence of fabrication or hallucination
-- Citation structure is implausible or impossible
-- Multiple red flags indicating fabrication
-
-Use UNCERTAIN when:
-- Citation appears structurally valid but has inconsistencies
-- Temporal inconsistencies (e.g., 2023 WL citation with 2020 parenthetical date)
-- Wrong parenthetical dates or court information
-- Incomplete citations or metadata misalignment
-- Any issues that require human review but don't clearly indicate fabrication
-
-Then provide:
-1. Your reasoning (2-3 sentences explaining your verdict)
-2. If INVALID: provide invalid_reason code
-3. If UNCERTAIN: provide uncertain_reason code
+If UNCERTAIN, you MUST use one of these exact reason codes:
+- structural_concerns
+- metadata_questionable
+- insufficient_verification
+- temporal_inconsistencies
+- requires_human_review
 
 Format your response as:
 VERDICT: [VALID, INVALID, or UNCERTAIN]
 REASONING: [2-3 sentences explaining your assessment]
 INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
 UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]`
+}
+
+/**
+ * Agent 2: Holistic Legal Analyst
+ * Analytical Style: Big-picture thinker who synthesizes multiple signals and considers Tier 2 panel context
+ * All agents investigate the FULL citation comprehensively - this agent emphasizes overall coherence and synthesis
+ */
+export function getHolisticLegalAnalystPrompt(
+  citation: Citation,
+  context: string,
+  tier2Results: CitationValidation
+): string {
+  const citationText = citation.citationText || ''
+  const citationType = citation.citationType || 'unknown'
+  
+  // Format Tier 2 panel results
+  const panelVerdicts = tier2Results.panel_evaluation.map(agent => {
+    let verdictStr = `${agent.agent}: ${agent.verdict}`
+    if (agent.invalid_reason) {
+      verdictStr += ` (${agent.invalid_reason})`
+    }
+    if (agent.uncertain_reason) {
+      verdictStr += ` (${agent.uncertain_reason})`
+    }
+    return verdictStr
+  }).join('\n- ')
+
+  return `You are a holistic legal analyst who synthesizes multiple signals and considers 
+the broader context. You approach investigations by looking at the big picture and how 
+different elements fit together. You are examining a citation that received conflicting 
+assessments from a panel of five validators.
+
+Citation: ${citationText}
+Citation Type: ${citationType}
+Document Context: ${context}
+
+Tier 2 Panel Results:
+- Agreement Level: ${tier2Results.consensus.agreement_level}
+- Verdicts: 
+- ${panelVerdicts}
+- Confidence Score: ${(tier2Results.consensus.confidence_score * 100).toFixed(0)}%
+- Panel Reasoning: ${tier2Results.consensus.reasoning}
+
+Your Task:
+Investigate this citation comprehensively and holistically. As a holistic analyst, you examine 
+ALL aspects: authority existence, metadata accuracy, temporal consistency, context fit, and 
+fabrication markers. You synthesize these signals together, consider the Tier 2 panel's 
+disagreements, and assess overall coherence.
+
+Investigate ALL of these areas comprehensively:
+
+1. AUTHORITY VERIFICATION
+   - Is this court/reporter/statute combination credible?
+   - Would this authority realistically exist at this time?
+   - Are there any red flags in the metadata (volumes, pages, years)?
+
+2. EXISTENCE ASSESSMENT
+   - Based on your knowledge, does this specific citation likely exist?
+   - Have you encountered this citation or similar ones?
+   - Is there any indication this is a known, real authority?
+
+3. TEMPORAL CONSISTENCY
+   - Do the dates and timeline make sense?
+   - Would this citation exist at this point in legal history?
+   - Are there temporal inconsistencies?
+
+4. CONTEXT ANALYSIS
+   - Does the citation fit the legal argument presented? (Note: A good fit is EXPECTED and POSITIVE - lawyers cite authorities that support their arguments. Do NOT treat a perfect fit as suspicious on its own.)
+   - Would a lawyer realistically cite this authority for this proposition?
+   - How does this citation fit within the broader document context?
+
+5. FABRICATION MARKERS
+   - Are there patterns suggesting AI invention?
+   - Do you see suspiciously convenient details?
+   - Are there markers of fabrication vs. real citations?
+
+6. TIER 2 SYNTHESIS
+   - Where did the Tier 2 panel disagree and why?
+   - Which agents were correct, and which missed important signals?
+   - How do the different Tier 2 perspectives synthesize into an overall assessment?
+   - What does the pattern of disagreement tell you about this citation?
+
+Your analytical style emphasizes synthesis and overall coherence. Consider how all the signals 
+fit together and what the Tier 2 panel's disagreement reveals about the citation.
+
+Respond with EXACTLY one of:
+- VALID: Citation appears to be real and legitimate. No significant issues detected.
+- INVALID: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
+- UNCERTAIN: Citation may be real but has issues requiring review, or insufficient information to determine validity.
+
+If INVALID, you MUST use one of these exact reason codes:
+- incoherent_synthesis
+- tier2_pattern_negative
+- fabrication_clear
+- context_mismatch
+- multiple_concerns
+
+If UNCERTAIN, you MUST use one of these exact reason codes:
+- mixed_signals
+- tier2_disagreement_unresolved
+- context_uncertain
+- synthesis_unclear
+- requires_human_review
+
+Format your response as:
+VERDICT: [VALID, INVALID, or UNCERTAIN]
+REASONING: [2-3 sentences explaining your assessment]
+INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
+UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]`
+}
+
+/**
+ * Agent 3: Pattern Recognition Expert
+ * Analytical Style: Expert at detecting fabrication patterns and authenticity markers
+ * All agents investigate the FULL citation comprehensively - this agent emphasizes pattern recognition and detecting AI hallucinations
+ */
+export function getPatternRecognitionExpertPrompt(
+  citation: Citation,
+  context: string,
+  tier2Results: CitationValidation
+): string {
+  const citationText = citation.citationText || ''
+  const citationType = citation.citationType || 'unknown'
+  
+  // Format Tier 2 panel results
+  const panelVerdicts = tier2Results.panel_evaluation.map(agent => {
+    let verdictStr = `${agent.agent}: ${agent.verdict}`
+    if (agent.invalid_reason) {
+      verdictStr += ` (${agent.invalid_reason})`
+    }
+    if (agent.uncertain_reason) {
+      verdictStr += ` (${agent.uncertain_reason})`
+    }
+    return verdictStr
+  }).join('\n- ')
+
+  return `You are a pattern recognition expert specializing in detecting fabrication patterns 
+and authenticity markers in legal citations. You have deep expertise in recognizing the 
+characteristics of AI-generated citations versus real legal authority. You are examining 
+a citation that received conflicting assessments from a panel of five validators.
+
+Citation: ${citationText}
+Citation Type: ${citationType}
+Document Context: ${context}
+
+Tier 2 Panel Results:
+- Agreement Level: ${tier2Results.consensus.agreement_level}
+- Verdicts: 
+- ${panelVerdicts}
+- Confidence Score: ${(tier2Results.consensus.confidence_score * 100).toFixed(0)}%
+- Panel Reasoning: ${tier2Results.consensus.reasoning}
+
+Your Task:
+Investigate this citation comprehensively with emphasis on pattern recognition. As a pattern 
+recognition expert, you examine ALL aspects: authority existence, metadata accuracy, temporal 
+consistency, context fit, and fabrication markers. You are particularly attuned to detecting 
+AI hallucination patterns and assessing overall authenticity gestalt.
+
+Investigate ALL of these areas comprehensively:
+
+1. AUTHORITY VERIFICATION
+   - Is this court/reporter/statute combination credible?
+   - Would this authority realistically exist at this time?
+   - Are there any red flags in the metadata (volumes, pages, years)?
+
+2. EXISTENCE ASSESSMENT
+   - Based on your knowledge, does this specific citation likely exist?
+   - Have you encountered this citation or similar ones?
+   - Is there any indication this is a known, real authority?
+
+3. TEMPORAL CONSISTENCY
+   - Do the dates and timeline make sense?
+   - Would this citation exist at this point in legal history?
+   - Are there temporal inconsistencies?
+
+4. CONTEXT ANALYSIS
+   - Does the citation fit the legal argument presented? (Note: A good fit is EXPECTED and POSITIVE - lawyers cite authorities that support their arguments. Do NOT treat a perfect fit as suspicious on its own.)
+   - Would a lawyer realistically cite this authority for this proposition?
+   - Does the citation feel embedded in real discourse or inserted artificially?
+
+5. FABRICATION PATTERN DETECTION
+   - Are there patterns suggesting AI invention? (e.g., suspiciously convenient page numbers, "too perfect" fits, generic party names)
+   - Do you see markers of AI hallucination vs. real citations?
+   - Does the citation have the "gestalt" of authenticity or fabrication?
+   - Are there patterns that feel constructed rather than organic?
+
+Common fabrication markers:
+- Suspiciously convenient page numbers (always starting at round numbers)
+- Party names that feel like examples rather than real parties
+- Citations that perfectly support arguments in ways that feel constructed
+- Unusual specificity (pin-cites that seem tailored)
+- Combinations that technically work but feel "too perfect"
+
+Real citations often:
+- Have messier specifics
+- May have unusual party names
+- Sometimes have odd page number progressions
+- Feel embedded in actual discourse rather than inserted
+
+6. TIER 2 PATTERN ANALYSIS
+   - What patterns do you see in the Tier 2 panel's disagreement?
+   - Do the Tier 2 concerns align with known fabrication markers?
+   - What does the pattern of Tier 2 verdicts suggest about authenticity?
+
+Your analytical style emphasizes pattern recognition and detecting fabrication markers. Assess 
+the overall "gestalt" - does this citation feel real or fabricated?
+
+Respond with EXACTLY one of:
+- VALID: Citation appears to be real and legitimate. No significant issues detected.
+- INVALID: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
+- UNCERTAIN: Citation may be real but has issues requiring review, or insufficient information to determine validity.
+
+If INVALID, you MUST use one of these exact reason codes:
+- fabrication_markers
+- hallucination_pattern
+- too_perfect_fit
+- authenticity_gestalt_negative
+- ai_invention_clear
+
+If UNCERTAIN, you MUST use one of these exact reason codes:
+- pattern_ambiguous
+- mixed_authenticity_signals
+- gestalt_unclear
+- some_fabrication_concerns
+- requires_human_review
+
+Format your response as:
+VERDICT: [VALID, INVALID, or UNCERTAIN]
+REASONING: [2-3 sentences explaining your assessment]
+INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
+UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]`
+}
+
+/**
+ * @deprecated Use getRigorousLegalInvestigatorPrompt, getHolisticLegalAnalystPrompt, or getPatternRecognitionExpertPrompt instead
+ * Legacy function kept for backward compatibility
+ */
+export function getTier3InvestigationPrompt(
+  citation: Citation,
+  context: string,
+  tier2Results: CitationValidation
+): string {
+  // Use Agent 1 (Rigorous Legal Investigator) as default for backward compatibility
+  return getRigorousLegalInvestigatorPrompt(citation, context, tier2Results)
 }
 

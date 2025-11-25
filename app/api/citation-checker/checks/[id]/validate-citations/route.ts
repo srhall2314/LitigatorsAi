@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { validateAllCitations } from "@/lib/citation-identification/validation"
+import { createValidationJob } from "@/lib/citation-identification/queue"
 import { ANTHROPIC_API_KEY } from "@/lib/env"
 
 export async function POST(
@@ -31,7 +31,7 @@ export async function POST(
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // Get the current CitationCheck (should have citations_identified status)
+    // Get the current CitationCheck
     const currentCheck = await prisma.citationCheck.findUnique({
       where: { id: params.id },
     })
@@ -42,67 +42,55 @@ export async function POST(
 
     if (!currentCheck.jsonData) {
       return NextResponse.json(
-        { error: "JSON data not found. Please generate JSON first." },
+        { error: "JSON data not found" },
         { status: 400 }
       )
     }
 
     const jsonData = currentCheck.jsonData as any
-    
-    // Verify citations exist
+
     if (!jsonData.document?.citations || jsonData.document.citations.length === 0) {
       return NextResponse.json(
-        { error: "No citations found. Please identify citations first." },
+        { error: "No citations found" },
         { status: 400 }
       )
     }
 
-    // Get the latest version for this fileUploadId to determine next version number
-    const latestVersion = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: currentCheck.fileUploadId },
-      orderBy: { version: "desc" },
+    // Check if job already exists
+    const existingJob = await prisma.validationJob.findUnique({
+      where: { checkId: params.id },
     })
 
-    const nextVersion = latestVersion ? latestVersion.version + 1 : 1
+    if (existingJob) {
+      return NextResponse.json({
+        jobId: existingJob.id,
+        status: existingJob.status,
+        message: "Job already exists",
+      })
+    }
 
-    // Create new version by copying jsonData from current version
-    const newVersion = await prisma.citationCheck.create({
-      data: {
-        fileUploadId: currentCheck.fileUploadId,
-        userId: user.id,
-        version: nextVersion,
-        status: "citations_validated",
-        jsonData: jsonData as any, // Copy from current version
-      },
+    // Create validation job and queue items
+    const jobId = await createValidationJob(params.id, jsonData)
+
+    // Trigger worker to start processing (fire and forget)
+    const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+    fetch(`${baseUrl}/api/citation-checker/worker/process-queue?maxItems=5`, {
+      method: 'POST',
+    }).catch(console.error)
+
+    return NextResponse.json({
+      jobId,
+      status: 'pending',
+      message: 'Validation job created and processing started',
     })
-
-    // Validate all citations
-    const updatedJsonData = await validateAllCitations(
-      jsonData,
-      ANTHROPIC_API_KEY,
-      (current, total) => {
-        console.log(`[ValidateCitations] Progress: ${current}/${total}`)
-      }
-    )
-
-    // Update version with validation results
-    const updated = await prisma.citationCheck.update({
-      where: { id: newVersion.id },
-      data: {
-        jsonData: updatedJsonData as any,
-        status: "citations_validated",
-      },
-    })
-
-    return NextResponse.json(updated)
   } catch (error) {
-    console.error("Error validating citations:", error)
+    console.error("Error creating validation job:", error)
     if (error instanceof Error) {
       console.error("Error details:", error.message, error.stack)
     }
     return NextResponse.json(
       { 
-        error: "Failed to validate citations",
+        error: "Failed to create validation job",
         details: error instanceof Error ? error.message : String(error)
       },
       { status: 500 }
@@ -126,9 +114,28 @@ export async function GET(
   // Create a readable stream
   const stream = new ReadableStream({
     async start(controller) {
+      let isClosed = false
+      
       const sendProgress = (data: any) => {
-        const message = `data: ${JSON.stringify(data)}\n\n`
-        controller.enqueue(encoder.encode(message))
+        if (isClosed) return
+        try {
+          const message = `data: ${JSON.stringify(data)}\n\n`
+          controller.enqueue(encoder.encode(message))
+        } catch (error) {
+          console.error("Error sending progress:", error)
+          isClosed = true
+        }
+      }
+      
+      const closeStream = () => {
+        if (!isClosed) {
+          isClosed = true
+          try {
+            controller.close()
+          } catch (error) {
+            // Stream may already be closed, ignore
+          }
+        }
       }
 
       try {
@@ -136,13 +143,13 @@ export async function GET(
         
         if (!session?.user?.email) {
           sendProgress({ type: "error", error: "Unauthorized" })
-          controller.close()
+          closeStream()
           return
         }
 
         if (!ANTHROPIC_API_KEY) {
           sendProgress({ type: "error", error: "Anthropic API key not configured" })
-          controller.close()
+          closeStream()
           return
         }
 
@@ -152,7 +159,7 @@ export async function GET(
 
         if (!user) {
           sendProgress({ type: "error", error: "User not found" })
-          controller.close()
+          closeStream()
           return
         }
 
@@ -163,13 +170,13 @@ export async function GET(
 
         if (!currentCheck) {
           sendProgress({ type: "error", error: "Citation check not found" })
-          controller.close()
+          closeStream()
           return
         }
 
         if (!currentCheck.jsonData) {
           sendProgress({ type: "error", error: "JSON data not found" })
-          controller.close()
+          closeStream()
           return
         }
 
@@ -177,7 +184,7 @@ export async function GET(
         
         if (!jsonData.document?.citations || jsonData.document.citations.length === 0) {
           sendProgress({ type: "error", error: "No citations found" })
-          controller.close()
+          closeStream()
           return
         }
 
@@ -267,14 +274,16 @@ export async function GET(
           jsonData: updatedJsonData
         })
 
-        controller.close()
+        closeStream()
       } catch (error) {
         console.error("Error in streaming validation:", error)
-        sendProgress({
-          type: "error",
-          error: error instanceof Error ? error.message : String(error)
-        })
-        controller.close()
+        if (!isClosed) {
+          sendProgress({
+            type: "error",
+            error: error instanceof Error ? error.message : String(error)
+          })
+        }
+        closeStream()
       }
     },
   })

@@ -14,7 +14,14 @@ import {
   getRealityAssessmentExpertPrompt
 } from './validation-prompts'
 import { parseAgentResponse, ParsedVerdict } from './response-parser'
-import { getTier3InvestigationPrompt, parseTier3Response, parseTier3AgentResponse } from './tier3-prompts'
+import { 
+  getTier3InvestigationPrompt, 
+  parseTier3Response, 
+  parseTier3AgentResponse,
+  getRigorousLegalInvestigatorPrompt,
+  getHolisticLegalAnalystPrompt,
+  getPatternRecognitionExpertPrompt
+} from './tier3-prompts'
 import { extractDocumentContext } from './context-extractor'
 
 // Agent configurations
@@ -38,6 +45,22 @@ const AGENT_CONFIGS = [
   {
     name: 'reality_assessment_expert_v1',
     getPrompt: getRealityAssessmentExpertPrompt,
+  },
+] as const
+
+// Tier 3 agent configurations
+const TIER3_AGENT_CONFIGS = [
+  {
+    name: 'tier3_rigorous_legal_investigator_v1',
+    getPrompt: getRigorousLegalInvestigatorPrompt,
+  },
+  {
+    name: 'tier3_holistic_legal_analyst_v1',
+    getPrompt: getHolisticLegalAnalystPrompt,
+  },
+  {
+    name: 'tier3_pattern_recognition_expert_v1',
+    getPrompt: getPatternRecognitionExpertPrompt,
   },
 ] as const
 
@@ -289,15 +312,15 @@ export async function validateCitationWithPanel(
  * Call a single Tier 3 agent with retry logic
  */
 async function callTier3Agent(
-  agentNumber: number,
+  agentConfig: typeof TIER3_AGENT_CONFIGS[number],
   citation: Citation,
   context: string,
   tier2Results: CitationValidation,
   apiKey: string
 ): Promise<Tier3AgentVerdict> {
   const anthropic = new Anthropic({ apiKey })
-  const prompt = getTier3InvestigationPrompt(citation, context, tier2Results)
-  const agentName = `tier3_agent_${agentNumber}`
+  const prompt = agentConfig.getPrompt(citation, context, tier2Results)
+  const agentName = agentConfig.name
   
   try {
     const message = await retry(
@@ -490,8 +513,8 @@ export async function validateCitationTier3(
 ): Promise<Tier3Result> {
   try {
     // Call all 3 agents in parallel
-    const agentPromises = [1, 2, 3].map(agentNum =>
-      callTier3Agent(agentNum, citation, context, tier2Results, apiKey)
+    const agentPromises = TIER3_AGENT_CONFIGS.map(agentConfig =>
+      callTier3Agent(agentConfig, citation, context, tier2Results, apiKey)
     )
     
     const panelEvaluations = await Promise.all(agentPromises)

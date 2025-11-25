@@ -222,6 +222,16 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
     return names[agentName] || `Agent: ${agentName}`
   }
 
+  // Helper function to get Tier 3 agent display name
+  const getTier3AgentDisplayName = (agentName: string) => {
+    const names: Record<string, string> = {
+      'tier3_rigorous_legal_investigator_v1': 'Rigorous Legal Investigator',
+      'tier3_holistic_legal_analyst_v1': 'Holistic Legal Analyst',
+      'tier3_pattern_recognition_expert_v1': 'Pattern Recognition Expert',
+    }
+    return names[agentName] || agentName
+  }
+
   // Helper function to format confidence score
   const formatConfidenceScore = (score: number) => {
     return (score * 100).toFixed(0)
@@ -535,20 +545,77 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                         </div>
                         
                         <div>
-                          <div className="text-xs font-medium text-gray-700 mb-1">Reasoning</div>
-                          <p className="text-sm text-gray-700">{citation.tier_3.reasoning}</p>
+                          <div className="text-xs font-medium text-gray-700 mb-1">Consensus Reasoning</div>
+                          <p className="text-sm text-gray-700">{citation.tier_3.consensus?.reasoning || citation.tier_3.reasoning}</p>
                         </div>
                         
-                        <div>
-                          <div className="text-xs font-medium text-gray-700 mb-1">Key Evidence</div>
-                          <p className="text-sm text-gray-700">{citation.tier_3.key_evidence}</p>
-                        </div>
+                        {/* Tier 3 Panel Evaluation Details - Expandable */}
+                        {citation.tier_3.panel_evaluation && citation.tier_3.panel_evaluation.length > 0 && (
+                          <details className="mt-4">
+                            <summary className="cursor-pointer text-sm font-semibold text-purple-900 hover:text-purple-700 mb-3">
+                              Show Tier 3 Panel Details ({citation.tier_3.panel_evaluation.length} agents)
+                            </summary>
+                            <div className="mt-3 space-y-3 pt-3 border-t border-purple-200">
+                              {citation.tier_3.panel_evaluation.map((agent: any, idx: number) => (
+                                <div
+                                  key={idx}
+                                  className="p-3 border border-purple-200 rounded-md bg-white"
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-4 h-4 rounded-full ${
+                                        agent.verdict === 'VALID' ? 'bg-green-500' :
+                                        agent.verdict === 'INVALID' ? 'bg-red-500' :
+                                        'bg-yellow-500'
+                                      }`} />
+                                      <span className="text-sm font-medium text-gray-900">
+                                        {getTier3AgentDisplayName(agent.agent)}
+                                      </span>
+                                    </div>
+                                    <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                      agent.verdict === 'VALID' ? 'bg-green-100 text-green-800' :
+                                      agent.verdict === 'INVALID' ? 'bg-red-100 text-red-800' :
+                                      'bg-yellow-100 text-yellow-800'
+                                    }`}>
+                                      {agent.verdict}
+                                    </span>
+                                  </div>
+                                  {agent.reasoning && (
+                                    <div className="mt-2 text-xs text-gray-600">
+                                      <span className="font-medium">Reasoning: </span>
+                                      <span>{agent.reasoning}</span>
+                                    </div>
+                                  )}
+                                  {(agent.invalid_reason || agent.uncertain_reason) && (
+                                    <div className="mt-1 text-xs text-gray-600">
+                                      <span className="font-medium">Reason Code: </span>
+                                      <span className="italic">{agent.invalid_reason || agent.uncertain_reason}</span>
+                                    </div>
+                                  )}
+                                  <div className="mt-1 text-xs text-gray-500">
+                                    Model: {agent.model} • {new Date(agent.timestamp).toLocaleString()}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
                         
-                        {citation.tier_3.remaining_uncertainties && (
-                          <div>
-                            <div className="text-xs font-medium text-gray-700 mb-1">Remaining Uncertainties</div>
-                            <p className="text-sm text-gray-600 italic">{citation.tier_3.remaining_uncertainties}</p>
-                          </div>
+                        {/* Legacy fields display (if present and panel_evaluation not available) */}
+                        {(!citation.tier_3.panel_evaluation || citation.tier_3.panel_evaluation.length === 0) && (
+                          <>
+                            <div>
+                              <div className="text-xs font-medium text-gray-700 mb-1">Key Evidence</div>
+                              <p className="text-sm text-gray-700">{citation.tier_3.key_evidence}</p>
+                            </div>
+                            
+                            {citation.tier_3.remaining_uncertainties && (
+                              <div>
+                                <div className="text-xs font-medium text-gray-700 mb-1">Remaining Uncertainties</div>
+                                <p className="text-sm text-gray-600 italic">{citation.tier_3.remaining_uncertainties}</p>
+                              </div>
+                            )}
+                          </>
                         )}
                         
                         <div className="pt-2 border-t border-purple-200">

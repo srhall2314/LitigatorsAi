@@ -377,7 +377,7 @@ Format your response as: "INVALID fabrication_markers" or "UNCERTAIN mixed_signa
 
 ---
 
-## Tier 3 Investigation Prompt
+## Tier 3 Investigation Prompts
 
 **Model Used**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`)
 
@@ -385,116 +385,128 @@ Format your response as: "INVALID fabrication_markers" or "UNCERTAIN mixed_signa
 
 **When Used**: Citations that receive split decisions (3/2 or worse) from the Tier 2 panel are escalated to Tier 3 for detailed investigation.
 
-**Prompt**:
+**Important**: Unlike Tier 2 (where agents focus on specific dimensions), Tier 3 agents all investigate the FULL citation comprehensively. They differ only in their analytical background/style, providing diverse perspectives on the same comprehensive investigation. All agents answer the same question: "Is this citation valid?"
 
-```
-You are a citation investigation specialist. You are examining a citation that 
-received conflicting assessments from a panel of five validators.
+---
 
-Citation: [CITATION_TEXT]
-Citation Type: [TYPE: case/statute/regulation/rule]
-Document Context: [FULL_PARAGRAPH_CONTAINING_CITATION]
+### Agent 1: Rigorous Legal Investigator
 
-Tier 2 Panel Results:
-- Agreement Level: [unanimous/strong/split]
-- Verdicts: 
-- [AGENT_1]: [VERDICT] ([REASON_CODE if applicable])
-- [AGENT_2]: [VERDICT] ([REASON_CODE if applicable])
-- [AGENT_3]: [VERDICT] ([REASON_CODE if applicable])
-- [AGENT_4]: [VERDICT] ([REASON_CODE if applicable])
-- [AGENT_5]: [VERDICT] ([REASON_CODE if applicable])
-- Confidence Score: [SCORE]%
-- Panel Reasoning: [SUMMARY_OF_DISAGREEMENT]
+**Analytical Style**: Conservative, detail-oriented investigator with deep knowledge of legal citation systems
 
-Your Task:
-Using everything you know about law, courts, reporters, statutes, case law, and 
-legal practices, investigate this citation thoroughly. Your goal is to determine 
-with high confidence whether this citation is real or fabricated.
+**Focus**: Emphasizes structural accuracy and methodical verification. Investigates ALL aspects: authority existence, metadata accuracy, temporal consistency, context fit, and fabrication markers.
 
-Investigation Steps:
-
-1. AUTHORITY VERIFICATION
-   - Is this court/reporter/statute combination credible?
-   - Would this authority realistically exist at this time?
-   - Are there any red flags in the metadata?
-
-2. EXISTENCE ASSESSMENT
-   - Based on your knowledge, does this specific citation likely exist?
-   - Have you encountered this citation or similar ones?
-   - Is there any indication this is a known, real authority?
-
-3. CONTEXT ANALYSIS
-   - Does the citation fit the legal argument presented? (Note: A good fit is EXPECTED and POSITIVE - lawyers cite authorities that support their arguments. Do NOT treat a perfect fit as suspicious on its own.)
-   - Would a lawyer realistically cite this authority for this proposition?
-   - Only flag fabrication concerns if there are OTHER red flags (generic names, unknown case, fabrication markers, etc.) BEYOND just a good fit. A citation that "serves the exact legal proposition needed" is what legitimate citations do - this is not a red flag.
-
-4. RECONCILE TIER 2 DISAGREEMENT
-   - Where did the panel disagree?
-   - Which agents were correct, and why?
-   - What did they miss or misinterpret?
-
-5. FABRICATION LIKELIHOOD
-   - If this is fabricated, what would make it fabricated?
-   - If this is real, what makes it credible despite uncertainty?
-   - Are there specific hallucination markers present?
-
-Provide Your Assessment:
-
-Respond with EXACTLY one of:
-- VERIFIED_REAL: Citation is real with high confidence
-- LIKELY_REAL: Citation appears real but with some uncertainty
-- LIKELY_FABRICATED: Citation appears fabricated with reasonable confidence
-- NEEDS_HUMAN_REVIEW: Citation appears real or structurally valid, but contains issues, contradictions, or context mismatches that require a human editor to resolve
-
-Use NEEDS_HUMAN_REVIEW when you detect:
-- Temporal inconsistencies (e.g., 2023 WL citation with 2020 parenthetical date)
-- Wrong parenthetical dates
-- Wrong court or jurisdiction in parenthetical
-- Case citation format used where a party brief is described
-- WL/Lexis cite whose year conflicts with filing description
-- Incomplete citations
-- Any metadata that doesn't align
-- Anything that is not fabricated, but not acceptable as-is
-
-Then provide:
-1. Your reasoning (2-3 sentences)
-2. Key evidence supporting your assessment
-3. Remaining uncertainties (if any)
-4. Confidence level (high/medium/low)
-
-Format your response as:
-VERDICT: [one of the four verdicts above]
-REASONING: [2-3 sentences]
-KEY_EVIDENCE: [key evidence]
-UNCERTAINTIES: [remaining uncertainties, or "None" if none]
-CONFIDENCE: [high/medium/low]
-```
+**Prompt Template**:
+Each agent receives the citation, document context, and Tier 2 panel results. The prompt emphasizes their analytical style while ensuring comprehensive investigation of all aspects.
 
 **Allowed Responses**:
-- `VERIFIED_REAL`: Citation is real with high confidence
-- `LIKELY_REAL`: Citation appears real but with some uncertainty
-- `LIKELY_FABRICATED`: Citation appears fabricated with reasonable confidence
-- `NEEDS_HUMAN_REVIEW`: Citation appears real or structurally valid, but contains issues, contradictions, or context mismatches that require a human editor to resolve
+- `VALID`: Citation appears to be real and legitimate. No significant issues detected.
+- `INVALID`: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
+- `UNCERTAIN`: Citation may be real but has issues requiring review, or insufficient information to determine validity.
 
-**When to use NEEDS_HUMAN_REVIEW**:
-Use this verdict when the citation appears real or structurally valid, but contains issues that require human editor resolution:
-- Temporal inconsistencies (e.g., 2023 WL citation with 2020 parenthetical date)
-- Wrong parenthetical dates
-- Wrong court or jurisdiction in parenthetical
-- Case citation format used where a party brief is described
-- WL/Lexis cite whose year conflicts with filing description
-- Incomplete citations
-- Any metadata that doesn't align
-- Anything that is not fabricated, but not acceptable as-is
+**Invalid Reason Codes**:
+- `structural_impossibility`: Citation structure is implausible or impossible
+- `metadata_inconsistent`: Metadata (volumes, pages, years) doesn't align
+- `authority_nonexistent`: Authority doesn't exist or couldn't exist
+- `fabrication_clear`: Clear evidence of fabrication
+- `multiple_red_flags`: Multiple red flags indicating fabrication
+
+**Uncertain Reason Codes**:
+- `structural_concerns`: Citation structure has concerns but may be valid
+- `metadata_questionable`: Metadata is questionable but not clearly wrong
+- `insufficient_verification`: Not enough information to verify confidently
+- `temporal_inconsistencies`: Temporal inconsistencies that need review
+- `requires_human_review`: Issues that require human review but don't clearly indicate fabrication
 
 **Response Format**:
-The Tier 3 agent must respond in a structured format:
 ```
-VERDICT: [VERIFIED_REAL|LIKELY_REAL|LIKELY_FABRICATED|NEEDS_HUMAN_REVIEW]
-REASONING: [2-3 sentences explaining the assessment]
-KEY_EVIDENCE: [Key evidence supporting the assessment]
-UNCERTAINTIES: [Remaining uncertainties, or "None" if none]
-CONFIDENCE: [high|medium|low]
+VERDICT: [VALID, INVALID, or UNCERTAIN]
+REASONING: [2-3 sentences explaining your assessment]
+INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
+UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]
+```
+
+---
+
+### Agent 2: Holistic Legal Analyst
+
+**Analytical Style**: Big-picture thinker who synthesizes multiple signals and considers Tier 2 panel context
+
+**Focus**: Emphasizes overall coherence and synthesis. Investigates ALL aspects: authority existence, metadata accuracy, temporal consistency, context fit, and fabrication markers. Considers Tier 2 disagreements and synthesizes different perspectives.
+
+**Prompt**:
+Similar structure to Agent 1, but emphasizes:
+- Synthesis of Tier 2 panel disagreements
+- Overall coherence assessment
+- How different signals fit together
+- Big-picture analysis
+
+**Allowed Responses**:
+- `VALID`: Citation appears to be real and legitimate. No significant issues detected.
+- `INVALID`: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
+- `UNCERTAIN`: Citation may be real but has issues requiring review, or insufficient information to determine validity.
+
+**Invalid Reason Codes**:
+- `incoherent_synthesis`: Elements don't synthesize into a coherent whole
+- `tier2_pattern_negative`: Tier 2 pattern suggests fabrication
+- `fabrication_clear`: Clear evidence of fabrication
+- `context_mismatch`: Citation doesn't fit context coherently
+- `multiple_concerns`: Multiple concerns that together suggest issues
+
+**Uncertain Reason Codes**:
+- `mixed_signals`: Some signals suggest validity, others suggest issues
+- `tier2_disagreement_unresolved`: Tier 2 disagreement couldn't be resolved
+- `context_uncertain`: Context fit is uncertain
+- `synthesis_unclear`: Overall synthesis is unclear
+- `requires_human_review`: Requires human review to resolve
+
+**Response Format**:
+```
+VERDICT: [VALID, INVALID, or UNCERTAIN]
+REASONING: [2-3 sentences explaining your assessment]
+INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
+UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]
+```
+
+---
+
+### Agent 3: Pattern Recognition Expert
+
+**Analytical Style**: Expert at detecting fabrication patterns and authenticity markers
+
+**Focus**: Emphasizes pattern recognition and detecting AI hallucinations. Investigates ALL aspects: authority existence, metadata accuracy, temporal consistency, context fit, and fabrication markers. Particularly attuned to fabrication patterns and authenticity gestalt.
+
+**Prompt**:
+Similar structure to Agent 1, but emphasizes:
+- Fabrication pattern detection
+- AI hallucination markers
+- Authenticity gestalt assessment
+- Pattern recognition expertise
+
+**Allowed Responses**:
+- `VALID`: Citation appears to be real and legitimate. No significant issues detected.
+- `INVALID`: Citation appears to be fabricated or hallucinated. Clear evidence of fabrication.
+- `UNCERTAIN`: Citation may be real but has issues requiring review, or insufficient information to determine validity.
+
+**Invalid Reason Codes**:
+- `fabrication_markers`: Clear markers of AI fabrication detected
+- `hallucination_pattern`: Pattern matches known AI hallucination patterns
+- `too_perfect_fit`: Citation fits too perfectly, suggesting construction
+- `authenticity_gestalt_negative`: Overall gestalt suggests fabrication
+- `ai_invention_clear`: Clear evidence of AI invention
+
+**Uncertain Reason Codes**:
+- `pattern_ambiguous`: Pattern is ambiguous, could be either
+- `mixed_authenticity_signals`: Some signals suggest authenticity, others suggest fabrication
+- `gestalt_unclear`: Overall gestalt is unclear
+- `some_fabrication_concerns`: Some fabrication concerns but not definitive
+- `requires_human_review`: Requires human review to assess patterns
+
+**Response Format**:
+```
+VERDICT: [VALID, INVALID, or UNCERTAIN]
+REASONING: [2-3 sentences explaining your assessment]
+INVALID_REASON: [reason code if verdict is INVALID, otherwise omit]
+UNCERTAIN_REASON: [reason code if verdict is UNCERTAIN, otherwise omit]
 ```
 
 ---
@@ -518,12 +530,14 @@ CONFIDENCE: [high|medium|low]
 1. **Tier 2**: All 5 agents evaluate citations in parallel
 2. **Consensus Calculation**: System determines agreement level
 3. **Tier 3 Escalation**: Citations with split decisions (3/2 or worse) are escalated
-4. **Tier 3 Investigation**: Single specialist agent performs deep investigation
+4. **Tier 3 Investigation**: All 3 agents investigate citations comprehensively in parallel (unlike Tier 2, they don't split investigation by dimension - all investigate fully)
+5. **Tier 3 Consensus**: System calculates consensus from 3-agent panel
 
 ### Response Parsing
 
 - Tier 2 responses are parsed to extract verdict and reason codes
-- Tier 3 responses are parsed to extract structured fields (verdict, reasoning, evidence, uncertainties, confidence)
+- Tier 3 responses are parsed to extract verdict (VALID/INVALID/UNCERTAIN), reasoning, and reason codes (similar to Tier 2)
+- Tier 3 consensus is calculated from 3-agent panel evaluations
 
 ---
 
@@ -537,7 +551,7 @@ CONFIDENCE: [high|medium|low]
 ## Files Reference
 
 - Tier 2 prompts: `lib/citation-identification/validation-prompts.ts`
-- Tier 3 prompt: `lib/citation-identification/tier3-prompts.ts`
+- Tier 3 prompts: `lib/citation-identification/tier3-prompts.ts`
 - Validation logic: `lib/citation-identification/validation.ts`
 - Specification docs: `validationT2.md`, `tier3prompt.md`
 
