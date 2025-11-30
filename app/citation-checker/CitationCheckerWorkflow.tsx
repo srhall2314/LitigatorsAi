@@ -55,23 +55,31 @@ export function CitationCheckerWorkflow() {
     setSelectedCheckId(newCheckId)
   }
 
-  useEffect(() => {
-    loadFiles()
-  }, [])
-
-  const loadFiles = async () => {
+  const loadFiles = useCallback(async () => {
     try {
+      setLoadingFiles(true)
       const res = await fetch("/api/citation-checker/files")
       if (res.ok) {
         const data = await res.json()
         setFiles(data)
+      } else {
+        console.error("Failed to load files:", res.status, res.statusText)
+        const errorData = await res.json().catch(() => ({}))
+        console.error("Error details:", errorData)
       }
     } catch (error) {
       console.error("Error loading files:", error)
+      if (error instanceof Error) {
+        console.error("Error details:", error.message, error.stack)
+      }
     } finally {
       setLoadingFiles(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadFiles()
+  }, [loadFiles])
 
   const steps: StepConfig[] = [
     {
