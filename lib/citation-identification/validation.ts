@@ -5,7 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import retry from 'async-retry'
-import { Citation, CitationDocument, AgentVerdict, Consensus, CitationValidation, AgreementLevel, CitationRecommendationType, Tier3Result, Tier3AgentVerdict, Tier3Consensus, Tier3FinalStatus, Tier3AgreementLevel } from '@/types/citation-json'
+import { Citation, CitationDocument, AgentVerdict, Consensus, CitationValidation, AgreementLevel, CitationRecommendationType, Tier3Result, Tier3AgentVerdict, Tier3Consensus, Tier3FinalStatus, Tier3AgreementLevel, Tier3RiskLevel } from '@/types/citation-json'
 import {
   getCitationAuthorityValidatorPrompt,
   getCaseEcologyValidatorPrompt,
@@ -23,6 +23,7 @@ import {
   getPatternRecognitionExpertPrompt
 } from './tier3-prompts'
 import { extractDocumentContext } from './context-extractor'
+import { extractTokens, calculateCost, calculateRunCost } from './token-tracking'
 
 // Agent configurations
 const AGENT_CONFIGS = [
@@ -138,6 +139,7 @@ async function callValidationAgent(
           return await anthropic.messages.create({
             model: MODEL,
             max_tokens: 1024,
+            temperature: 0.4, // Balanced temperature for consistent but not overly conservative validation
             messages: [
               {
                 role: 'user',
@@ -166,6 +168,9 @@ async function callValidationAgent(
       }
     )
     
+    // Extract token usage from response
+    const tokenUsage = extractTokens(message, MODEL, 'anthropic')
+    
     // Extract text from response
     const responseText = message.content
       .filter((block): block is Anthropic.Messages.TextBlock => block.type === 'text')
@@ -175,30 +180,51 @@ async function callValidationAgent(
     // Parse response
     const parsed = parseAgentResponse(responseText, agentConfig.name)
     
-    // Build agent verdict
+    // Build agent verdict - prioritize new format (numeric score)
     const verdict: AgentVerdict = {
       agent: agentConfig.name,
-      verdict: parsed.verdict,
       timestamp: new Date().toISOString(),
       model: MODEL,
     }
     
-    if (parsed.invalid_reason) {
-      verdict.invalid_reason = parsed.invalid_reason
+    // New format: numeric scoring
+    if (parsed.score !== undefined) {
+      verdict.score = parsed.score
+      if (parsed.reasoning) {
+        verdict.reasoning = parsed.reasoning
+      }
+    } else {
+      // Legacy format: verdict-based
+      verdict.verdict = parsed.verdict
+      if (parsed.invalid_reason) {
+        verdict.invalid_reason = parsed.invalid_reason
+      }
+      if (parsed.uncertain_reason) {
+        verdict.uncertain_reason = parsed.uncertain_reason
+      }
     }
-    if (parsed.uncertain_reason) {
-      verdict.uncertain_reason = parsed.uncertain_reason
+    
+    // Add token usage and cost if available
+    if (tokenUsage) {
+      verdict.token_usage = {
+        input_tokens: tokenUsage.input_tokens,
+        output_tokens: tokenUsage.output_tokens,
+        total_tokens: tokenUsage.total_tokens,
+        provider: tokenUsage.provider,
+      }
+      const cost = calculateCost(tokenUsage)
+      verdict.cost = cost
     }
     
     return verdict
   } catch (error) {
     console.error(`[Validation] Error calling agent ${agentConfig.name} after retries:`, error)
     
-    // Return UNCERTAIN verdict on error after retries exhausted
+    // Return default score of 5 (middle) on error after retries exhausted
     return {
       agent: agentConfig.name,
-      verdict: 'UNCERTAIN',
-      uncertain_reason: 'api_error',
+      score: 5,
+      reasoning: 'api_error',
       timestamp: new Date().toISOString(),
       model: MODEL,
     }
@@ -207,9 +233,84 @@ async function callValidationAgent(
 
 /**
  * Calculate consensus from panel evaluations
+ * Supports both new format (numeric scoring) and legacy format (verdict-based)
  */
 export function calculateConsensus(panelEvaluations: AgentVerdict[]): Consensus {
-  // Count verdicts
+  // Check if we're using new format (numeric scoring)
+  const isNewFormat = panelEvaluations.some(eval_ => typeof eval_.score === 'number')
+  
+  if (isNewFormat) {
+    // NEW FORMAT: Numeric scoring
+    const scores = panelEvaluations
+      .map(eval_ => eval_.score ?? 5) // Default to 5 if score missing
+      .filter((score): score is number => typeof score === 'number' && score >= 1 && score <= 10)
+    
+    // Calculate statistics
+    const average_score = scores.reduce((a, b) => a + b, 0) / scores.length
+    const variance = scores.reduce((sum, score) => sum + Math.pow(score - average_score, 2), 0) / scores.length
+    const standard_deviation = Math.sqrt(variance)
+    
+    // Determine agreement level based on standard deviation
+    let agreement_level: AgreementLevel
+    if (standard_deviation <= 1.0) {
+      agreement_level = 'unanimous' // Very low variance
+    } else if (standard_deviation <= 2.0) {
+      agreement_level = 'strong' // Low variance
+    } else {
+      agreement_level = 'split' // High variance
+    }
+    
+    // Calculate confidence score: normalized average (0-1 scale)
+    const confidence_score = average_score / 10
+    
+    // Determine recommendation based on average_score
+    let recommendation: CitationRecommendationType
+    let reasoning = ''
+    
+    if (average_score >= 8.0) {
+      recommendation = 'CITATION_LIKELY_VALID'
+      reasoning = `High average confidence (${average_score.toFixed(1)}/10). Citation assessed as real.`
+    } else if (average_score >= 5.0) {
+      recommendation = 'CITATION_UNCERTAIN'
+      reasoning = `Moderate average confidence (${average_score.toFixed(1)}/10). Citation has mixed signals.`
+    } else {
+      recommendation = 'CITATION_LIKELY_HALLUCINATED'
+      reasoning = `Low average confidence (${average_score.toFixed(1)}/10). Multiple concerns identified.`
+    }
+    
+    // Add variance information
+    if (standard_deviation > 2.0) {
+      reasoning += ` High variance (σ=${standard_deviation.toFixed(1)}) indicates panel disagreement.`
+    }
+    
+    // Add specific agent concerns to reasoning
+    const concerns: string[] = []
+    for (const eval_ of panelEvaluations) {
+      if (eval_.score !== undefined && eval_.score < 5 && eval_.reasoning) {
+        concerns.push(`${eval_.agent}: ${eval_.reasoning.substring(0, 50)}`)
+      }
+    }
+    
+    if (concerns.length > 0) {
+      reasoning += ` Concerns: ${concerns.join('; ')}.`
+    }
+    
+    // Code-based Tier 3 escalation: variance OR low average score
+    const tier_3_trigger = standard_deviation > 2.0 || average_score < 6.0
+    
+    return {
+      agreement_level,
+      scores,
+      average_score,
+      variance,
+      standard_deviation,
+      confidence_score,
+      recommendation,
+      reasoning,
+      tier_3_trigger,
+    }
+  } else {
+    // LEGACY FORMAT: Verdict-based
   const verdict_counts = {
     VALID: 0,
     INVALID: 0,
@@ -217,7 +318,9 @@ export function calculateConsensus(panelEvaluations: AgentVerdict[]): Consensus 
   }
   
   for (const eval_ of panelEvaluations) {
+      if (eval_.verdict) {
     verdict_counts[eval_.verdict]++
+      }
   }
   
   // Determine agreement level
@@ -236,23 +339,16 @@ export function calculateConsensus(panelEvaluations: AgentVerdict[]): Consensus 
   const confidence_score = maxCount / 5
   
   // Determine recommendation
-  // Thresholds based on VALID verdict count:
-  // - 4-5 VALID (confidence 0.8-1.0) = CITATION_LIKELY_VALID
-  // - 2-3 VALID (confidence 0.4-0.6) = CITATION_UNCERTAIN
-  // - 0-1 VALID (confidence <= 0.4) = CITATION_LIKELY_HALLUCINATED
   let recommendation: CitationRecommendationType
   let reasoning = ''
   
   if (verdict_counts.VALID >= 4) {
-    // 4-5 VALID verdicts - high confidence in validity
     recommendation = 'CITATION_LIKELY_VALID'
     reasoning = `All agents (${verdict_counts.VALID}/5) found no issues. Citation assessed as real.`
   } else if (verdict_counts.VALID >= 2) {
-    // 2-3 VALID - split decision, uncertain
     recommendation = 'CITATION_UNCERTAIN'
     reasoning = `Panel disagreement: ${verdict_counts.VALID} valid, ${verdict_counts.INVALID} invalid, ${verdict_counts.UNCERTAIN} uncertain. Citation has both credible and suspicious markers.`
   } else {
-    // 0-1 VALID with majority INVALID - likely hallucinated
     recommendation = 'CITATION_LIKELY_HALLUCINATED'
     reasoning = `Majority finding against validity: ${verdict_counts.VALID} valid, ${verdict_counts.INVALID} invalid, ${verdict_counts.UNCERTAIN} uncertain. Multiple validators flagged problems.`
   }
@@ -281,6 +377,7 @@ export function calculateConsensus(panelEvaluations: AgentVerdict[]): Consensus 
     recommendation,
     reasoning,
     tier_3_trigger,
+    }
   }
 }
 
@@ -302,10 +399,15 @@ export async function validateCitationWithPanel(
   // Calculate consensus
   const consensus = calculateConsensus(panelEvaluations)
   
-  return {
+  const result: CitationValidation = {
     panel_evaluation: panelEvaluations,
     consensus,
   }
+  
+  // Calculate and add run cost
+  result.run_cost = calculateRunCost(result)
+  
+  return result
 }
 
 /**
@@ -315,11 +417,13 @@ async function callTier3Agent(
   agentConfig: typeof TIER3_AGENT_CONFIGS[number],
   citation: Citation,
   context: string,
+  // tier2Results parameter kept for logging but not passed to prompts (Tier 3 evaluates independently)
   tier2Results: CitationValidation,
   apiKey: string
 ): Promise<Tier3AgentVerdict> {
   const anthropic = new Anthropic({ apiKey })
-  const prompt = agentConfig.getPrompt(citation, context, tier2Results)
+  // Remove tier2Results from prompt call - Tier 3 evaluates independently
+  const prompt = agentConfig.getPrompt(citation, context)
   const agentName = agentConfig.name
   
   try {
@@ -329,6 +433,7 @@ async function callTier3Agent(
           return await anthropic.messages.create({
             model: TIER3_MODEL,
             max_tokens: 2048,
+            temperature: 0.4, // Balanced temperature for consistent but not overly conservative validation
             messages: [
               {
                 role: 'user',
@@ -357,6 +462,9 @@ async function callTier3Agent(
       }
     )
     
+    // Extract token usage from response
+    const tokenUsage = extractTokens(message, TIER3_MODEL, 'anthropic')
+    
     // Extract text from response
     const responseText = message.content
       .filter((block): block is Anthropic.Messages.TextBlock => block.type === 'text')
@@ -366,31 +474,48 @@ async function callTier3Agent(
     // Parse response
     const parsed = parseTier3AgentResponse(responseText, agentName)
     
-    // Build agent verdict
+    // Build agent verdict - prioritize new format (risk-based)
     const verdict: Tier3AgentVerdict = {
       agent: agentName,
-      verdict: parsed.verdict,
       reasoning: parsed.reasoning,
       timestamp: new Date().toISOString(),
       model: TIER3_MODEL,
     }
     
-    if (parsed.invalid_reason) {
-      verdict.invalid_reason = parsed.invalid_reason
+    // New format: risk-based evaluation
+    if (parsed.risk_level) {
+      verdict.risk_level = parsed.risk_level
+    } else {
+      // Legacy format: verdict-based
+      verdict.verdict = parsed.verdict
+      if (parsed.invalid_reason) {
+        verdict.invalid_reason = parsed.invalid_reason
+      }
+      if (parsed.uncertain_reason) {
+        verdict.uncertain_reason = parsed.uncertain_reason
+      }
     }
-    if (parsed.uncertain_reason) {
-      verdict.uncertain_reason = parsed.uncertain_reason
+    
+    // Add token usage and cost if available
+    if (tokenUsage) {
+      verdict.token_usage = {
+        input_tokens: tokenUsage.input_tokens,
+        output_tokens: tokenUsage.output_tokens,
+        total_tokens: tokenUsage.total_tokens,
+        provider: tokenUsage.provider,
+      }
+      const cost = calculateCost(tokenUsage)
+      verdict.cost = cost
     }
     
     return verdict
   } catch (error) {
     console.error(`[Tier3] Error calling agent ${agentName} after retries:`, error)
     
-    // Return UNCERTAIN verdict on error after retries exhausted
+    // Return default MODERATE_RISK on error after retries exhausted
     return {
       agent: agentName,
-      verdict: 'UNCERTAIN',
-      uncertain_reason: 'api_error',
+      risk_level: 'MODERATE_RISK',
       reasoning: `Error occurred during Tier 3 investigation: ${error instanceof Error ? error.message : String(error)}`,
       timestamp: new Date().toISOString(),
       model: TIER3_MODEL,
@@ -399,14 +524,27 @@ async function callTier3Agent(
 }
 
 /**
- * Helper function to get Tier 3 final status from old format (backward compatibility)
+ * Helper function to get Tier 3 final status from new format (risk-based) or legacy format
+ * Maps risk levels to final_status for backward compatibility
  */
 export function getTier3FinalStatus(tier3Result: Tier3Result | null | undefined): Tier3FinalStatus | null {
   if (!tier3Result) {
     return null
   }
   
-  // New format: use consensus.final_status
+  // New format: use consensus.final_risk_level and map to final_status
+  if (tier3Result.consensus?.final_risk_level) {
+    const riskLevel = tier3Result.consensus.final_risk_level
+    if (riskLevel === 'LOW_RISK') {
+      return 'VALID'
+    } else if (riskLevel === 'MODERATE_RISK') {
+      return 'WARN'
+    } else if (riskLevel === 'NEEDS_ADDITIONAL_REVIEW') {
+      return 'FAIL'
+    }
+  }
+  
+  // Legacy format: use consensus.final_status
   if (tier3Result.consensus?.final_status) {
     return tier3Result.consensus.final_status
   }
@@ -428,9 +566,89 @@ export function getTier3FinalStatus(tier3Result: Tier3Result | null | undefined)
 
 /**
  * Calculate Tier 3 consensus from 3-agent panel evaluations
+ * Supports both new format (risk-based) and legacy format (verdict-based)
  */
 export function calculateTier3Consensus(panelEvaluations: Tier3AgentVerdict[]): Tier3Consensus {
-  // Count verdicts
+  // Check if we're using new format (risk-based)
+  const isNewFormat = panelEvaluations.some(eval_ => eval_.risk_level !== undefined)
+  
+  if (isNewFormat) {
+    // NEW FORMAT: Risk-based evaluation
+    const risk_level_counts = {
+      LOW_RISK: 0,
+      MODERATE_RISK: 0,
+      NEEDS_ADDITIONAL_REVIEW: 0,
+    }
+    
+    for (const eval_ of panelEvaluations) {
+      if (eval_.risk_level) {
+        risk_level_counts[eval_.risk_level]++
+      }
+    }
+    
+    // Determine final_risk_level (majority wins, with tie-breaker logic)
+    let final_risk_level: Tier3RiskLevel
+    const maxCount = Math.max(
+      risk_level_counts.LOW_RISK,
+      risk_level_counts.MODERATE_RISK,
+      risk_level_counts.NEEDS_ADDITIONAL_REVIEW
+    )
+    
+    if (risk_level_counts.LOW_RISK === maxCount && risk_level_counts.LOW_RISK >= 2) {
+      final_risk_level = 'LOW_RISK'
+    } else if (risk_level_counts.NEEDS_ADDITIONAL_REVIEW === maxCount && risk_level_counts.NEEDS_ADDITIONAL_REVIEW >= 2) {
+      final_risk_level = 'NEEDS_ADDITIONAL_REVIEW'
+    } else {
+      final_risk_level = 'MODERATE_RISK' // Default for ties or mixed results
+    }
+    
+    // Determine agreement level
+    let agreement_level: Tier3AgreementLevel
+    if (maxCount === 3) {
+      agreement_level = 'unanimous'
+    } else if (maxCount === 2) {
+      agreement_level = 'majority'
+    } else {
+      agreement_level = 'split'
+    }
+    
+    // Calculate confidence score: maxCount / 3
+    const confidence_score = maxCount / 3
+    
+    // Generate reasoning
+    let reasoning = `Panel consensus: ${risk_level_counts.LOW_RISK} low risk, ${risk_level_counts.MODERATE_RISK} moderate risk, ${risk_level_counts.NEEDS_ADDITIONAL_REVIEW} needs additional review. `
+    
+    if (final_risk_level === 'LOW_RISK') {
+      reasoning += 'All three agents assessed the citation as low risk.'
+    } else if (final_risk_level === 'MODERATE_RISK') {
+      reasoning += 'Mixed risk assessment - some concerns exist but citation may still be valid.'
+    } else {
+      reasoning += 'Multiple agents identified significant concerns requiring additional review.'
+    }
+    
+    // Add specific agent concerns to reasoning
+    const concerns: string[] = []
+    for (const eval_ of panelEvaluations) {
+      if (eval_.risk_level === 'NEEDS_ADDITIONAL_REVIEW' && eval_.reasoning) {
+        concerns.push(`${eval_.agent}: ${eval_.reasoning.substring(0, 100)}`)
+      } else if (eval_.risk_level === 'MODERATE_RISK' && eval_.reasoning) {
+        concerns.push(`${eval_.agent}: ${eval_.reasoning.substring(0, 80)}`)
+      }
+    }
+    
+    if (concerns.length > 0) {
+      reasoning += ` Concerns: ${concerns.join('; ')}.`
+    }
+    
+    return {
+      agreement_level,
+      risk_level_counts,
+      final_risk_level,
+      confidence_score,
+      reasoning,
+    }
+  } else {
+    // LEGACY FORMAT: Verdict-based
   const verdict_counts = {
     VALID: 0,
     INVALID: 0,
@@ -438,7 +656,9 @@ export function calculateTier3Consensus(panelEvaluations: Tier3AgentVerdict[]): 
   }
   
   for (const eval_ of panelEvaluations) {
+      if (eval_.verdict) {
     verdict_counts[eval_.verdict]++
+      }
   }
   
   // Determine final_status based on VALID count:
@@ -499,6 +719,7 @@ export function calculateTier3Consensus(panelEvaluations: Tier3AgentVerdict[]): 
     final_status,
     confidence_score,
     reasoning,
+    }
   }
 }
 
@@ -538,6 +759,9 @@ export async function validateCitationTier3(
       timestamp: new Date().toISOString(),
       model: TIER3_MODEL,
     }
+    
+    // Calculate and add run cost
+    result.run_cost = calculateRunCost(result)
     
     return result
   } catch (error) {

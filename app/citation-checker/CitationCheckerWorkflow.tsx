@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { ValidationSummary } from "./components/ValidationSummary"
 
 type WorkflowStep = 
   | "upload"
@@ -1039,7 +1040,7 @@ function ValidateCitationsStep({
   checkId: string | null
 }) {
   const [validating, setValidating] = useState(false)
-  const [results, setResults] = useState<{ valid: number; invalid: number } | null>(null)
+  const [results, setResults] = useState<{ valid: number; invalid: number; uncertain?: number; total?: number } | null>(null)
   const [citations, setCitations] = useState<any[]>([])
   
   // Load citations from check data
@@ -1067,7 +1068,7 @@ function ValidateCitationsStep({
     setValidating(true)
     // TODO: Implement citation validation API
     setTimeout(() => {
-      setResults({ valid: 1, invalid: 1 })
+      setResults({ valid: 1, invalid: 1, uncertain: 0, total: 2 })
       setValidating(false)
       onComplete()
     }, 2000)
@@ -1084,17 +1085,17 @@ function ValidateCitationsStep({
       </button>
 
       {results && (
-        <div className="mt-4 p-4 bg-gray-50 rounded-md">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-sm text-gray-600">Valid Citations</div>
-              <div className="text-2xl font-bold text-green-600">{results.valid}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Invalid Citations</div>
-              <div className="text-2xl font-bold text-red-600">{results.invalid}</div>
-            </div>
-          </div>
+        <div className="mt-4">
+          <ValidationSummary
+            statistics={{
+              lowRisk: results.valid,
+              moderateRisk: results.uncertain || 0,
+              needsReview: results.invalid,
+              total: results.total || (results.valid + results.invalid + (results.uncertain || 0))
+            }}
+            showTotal={false}
+            variant="compact"
+          />
         </div>
       )}
       
@@ -1224,26 +1225,30 @@ function CitationsReportStep({ fileId, checkId }: { fileId: string | null; check
         <h3 className="text-lg font-semibold text-black mb-4">
           Citation Validation Report
         </h3>
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-4 gap-4 mb-6">
           <div>
             <div className="text-sm text-gray-600">Total Citations</div>
             <div className="text-2xl font-bold text-black">2</div>
           </div>
-          <div>
-            <div className="text-sm text-gray-600">Valid</div>
-            <div className="text-2xl font-bold text-green-600">1</div>
-          </div>
-          <div>
-            <div className="text-sm text-gray-600">Invalid</div>
-            <div className="text-2xl font-bold text-red-600">1</div>
-          </div>
+          <ValidationSummary
+            statistics={{
+              lowRisk: 1,
+              moderateRisk: 0,
+              needsReview: 1,
+              total: 2
+            }}
+            title=""
+            showTotal={false}
+            variant="compact"
+            className="col-span-3 p-0 bg-transparent"
+          />
         </div>
 
         <div className="mt-6">
           <h4 className="font-semibold text-black mb-2">Summary</h4>
           <p className="text-black text-sm">
-            Your document contains 2 citations. 1 citation was validated successfully,
-            while 1 citation requires attention. Please review the discrepancies section
+            Your document contains 2 citations. 1 citation is assessed as low risk,
+            while 1 citation needs additional review. Please review the discrepancies section
             for details.
           </p>
         </div>

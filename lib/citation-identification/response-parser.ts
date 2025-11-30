@@ -1,20 +1,23 @@
 /**
  * Response Parser for Validation Agents
- * Parses LLM responses to extract VALID/INVALID/UNCERTAIN verdicts and reason codes
+ * Parses LLM responses to extract numeric scores (new format) or VALID/INVALID/UNCERTAIN verdicts (legacy format)
  */
 
 import { ValidationVerdict } from '@/types/citation-json'
 
 export interface ParsedVerdict {
-  verdict: ValidationVerdict
+  // New format: numeric scoring
+  score?: number; // 1-10
+  reasoning?: string; // Optional explanation
+  // Legacy format: kept for backward compatibility
+  verdict?: ValidationVerdict
   invalid_reason?: string
   uncertain_reason?: string
 }
 
 /**
- * Parse agent response to extract verdict and reason codes
- * Looks for exact match: "VALID", "INVALID", or "UNCERTAIN"
- * Extracts reason codes if present
+ * Parse agent response to extract numeric score (new format) or verdict (legacy format)
+ * Supports both new numeric scoring format and legacy VALID/INVALID/UNCERTAIN format
  */
 export function parseAgentResponse(
   responseText: string,
@@ -22,6 +25,68 @@ export function parseAgentResponse(
 ): ParsedVerdict {
   const normalized = responseText.trim().toUpperCase()
   
+  // NEW FORMAT: Try to parse numeric score (1-10)
+  // Look for SCORE: pattern
+  const scoreMatch = responseText.match(/SCORE:\s*(\d+)/i) || 
+                     responseText.match(/SCORE\s*(\d+)/i) ||
+                     responseText.match(/(?:^|\s)(\d{1,2})(?:\s|$)/)
+  
+  if (scoreMatch) {
+    const parsedScore = parseInt(scoreMatch[1], 10)
+    if (parsedScore >= 1 && parsedScore <= 10) {
+      // Extract reasoning if provided - capture everything after REASONING: to end of response
+      // Try to capture until a blank line or another section marker, otherwise capture everything
+      const reasoningMatch = responseText.match(/REASONING:\s*([\s\S]*?)(?:\n\n|\nSCORE:|$)/i) ||
+                             responseText.match(/REASONING:\s*([\s\S]*)/i)
+      const reasoning = reasoningMatch ? reasoningMatch[1].trim() : undefined
+      
+      return {
+        score: parsedScore,
+        reasoning,
+      }
+    }
+  }
+  
+  // LEGACY FORMAT: Parse VALID/INVALID/UNCERTAIN verdicts
+  // Try to parse as JSON first (legacy JSON format)
+  try {
+    // Extract JSON from response (handle cases where there might be markdown code blocks)
+    let jsonText = responseText.trim()
+    
+    // Remove markdown code blocks if present
+    jsonText = jsonText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '')
+    jsonText = jsonText.trim()
+    
+    // Try to extract JSON object if there's extra text
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      jsonText = jsonMatch[0]
+    }
+    
+    const parsed = JSON.parse(jsonText)
+    
+    if (parsed.label && ['VALID', 'INVALID', 'UNCERTAIN'].includes(parsed.label)) {
+      const verdict: ValidationVerdict = parsed.label as ValidationVerdict
+      const result: ParsedVerdict = { verdict }
+      
+      // Extract reason from JSON
+      if (parsed.reason) {
+        // Use the reason text, or derive reason code from signals if needed
+        if (verdict === 'INVALID') {
+          // Try to extract a reason code from the reason text or signals
+          result.invalid_reason = parsed.reason.substring(0, 100) // Store first 100 chars as reason
+        } else if (verdict === 'UNCERTAIN') {
+          result.uncertain_reason = parsed.reason.substring(0, 100) // Store first 100 chars as reason
+        }
+      }
+      
+      return result
+    }
+  } catch (e) {
+    // Not JSON, fall through to text parsing
+  }
+  
+  // Fallback to text parsing (legacy format)
   // Look for verdict keywords
   let verdict: ValidationVerdict = 'UNCERTAIN' // Default to uncertain if unclear
   let invalid_reason: string | undefined
@@ -128,7 +193,7 @@ export function parseAgentResponse(
   }
 
   // If we couldn't determine verdict, log for debugging
-  if (verdict === 'UNCERTAIN' && !normalized.includes('UNCERTAIN')) {
+  if (verdict === 'UNCERTAIN' && !normalized.includes('UNCERTAIN') && !normalized.includes('SCORE')) {
     console.warn(`[ResponseParser] Could not parse verdict from agent ${agentName}. Response: ${responseText.substring(0, 200)}`)
   }
 

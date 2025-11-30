@@ -8,19 +8,63 @@ export async function createValidationJob(
   checkId: string,
   jsonData: CitationDocument
 ): Promise<string> {
+  // Validate prisma is initialized
+  if (!prisma) {
+    throw new Error("Prisma client is not initialized")
+  }
+
+  // Validate input
+  if (!jsonData || !jsonData.document) {
+    throw new Error("Invalid jsonData: missing document structure")
+  }
+
   const citations = jsonData.document?.citations || []
   
+  if (!Array.isArray(citations)) {
+    throw new Error(`Invalid citations: expected array, got ${typeof citations}`)
+  }
+
+  if (citations.length === 0) {
+    throw new Error("No citations found in document")
+  }
+
+  // Validate citation structure
+  for (let i = 0; i < citations.length; i++) {
+    const citation = citations[i]
+    if (!citation || typeof citation !== 'object') {
+      throw new Error(`Invalid citation at index ${i}: not an object`)
+    }
+    if (!citation.id || typeof citation.id !== 'string') {
+      throw new Error(`Invalid citation at index ${i}: missing or invalid id field`)
+    }
+  }
+  
   // Create job
-  const job = await prisma.validationJob.create({
-    data: {
-      checkId,
-      status: 'pending',
-      tier2Total: citations.length,
-      tier2Completed: 0,
-      tier3Total: 0,
-      tier3Completed: 0,
-    },
-  })
+  let job
+  try {
+    job = await prisma.validationJob.create({
+      data: {
+        checkId,
+        status: 'pending',
+        tier2Total: citations.length,
+        tier2Completed: 0,
+        tier3Total: 0,
+        tier3Completed: 0,
+      },
+    })
+  } catch (error: any) {
+    // Check if it's a unique constraint violation
+    if (error?.code === 'P2002' || error?.message?.includes('Unique constraint')) {
+      // Job already exists - this shouldn't happen if route checks first, but handle gracefully
+      const existingJob = await prisma.validationJob.findUnique({
+        where: { checkId },
+      })
+      if (existingJob) {
+        return existingJob.id
+      }
+    }
+    throw error
+  }
   
   // Create queue items for Tier 2 validation
   const queueItems = citations.map((citation, index) => ({
@@ -31,17 +75,60 @@ export async function createValidationJob(
     status: 'pending' as const,
   }))
   
-  await prisma.validationQueueItem.createMany({
-    data: queueItems,
-  })
+  try {
+    await prisma.validationQueueItem.createMany({
+      data: queueItems,
+    })
+  } catch (error: any) {
+    // If queue item creation fails, clean up the job
+    await prisma.validationJob.delete({
+      where: { id: job.id },
+    }).catch(() => {
+      // Ignore cleanup errors
+    })
+    throw new Error(`Failed to create queue items: ${error.message || String(error)}`)
+  }
   
   return job.id
 }
 
+// Processing timeout: reset items stuck in "processing" status for more than 10 minutes
+const PROCESSING_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+
+/**
+ * Reset queue items stuck in "processing" status
+ */
+export async function resetStuckProcessingItems(): Promise<number> {
+  const timeoutDate = new Date(Date.now() - PROCESSING_TIMEOUT_MS)
+  
+  const result = await prisma.validationQueueItem.updateMany({
+    where: {
+      status: 'processing',
+      updatedAt: {
+        lt: timeoutDate,
+      },
+    },
+    data: {
+      status: 'pending',
+      error: 'Reset due to processing timeout',
+    },
+  })
+  
+  if (result.count > 0) {
+    console.log(`[resetStuckProcessingItems] Reset ${result.count} stuck processing items`)
+  }
+  
+  return result.count
+}
+
 /**
  * Get next pending queue item to process
+ * Automatically resets stuck processing items before fetching
  */
 export async function getNextQueueItem() {
+  // Reset stuck items first
+  await resetStuckProcessingItems()
+  
   return await prisma.validationQueueItem.findFirst({
     where: {
       status: 'pending',
@@ -74,6 +161,7 @@ export async function markQueueItemProcessing(itemId: string): Promise<void> {
 
 /**
  * Mark queue item as completed with result
+ * Uses transaction to ensure atomicity and includes error handling
  */
 export async function markQueueItemCompleted(
   itemId: string,
@@ -85,51 +173,102 @@ export async function markQueueItemCompleted(
     include: { job: true },
   })
   
-  if (!item) return
+  if (!item) {
+    console.error(`[markQueueItemCompleted] Queue item ${itemId} not found`)
+    return
+  }
   
-  // Update queue item
-  await prisma.validationQueueItem.update({
-    where: { id: itemId },
-    data: {
-      status: 'completed',
-      result: result as any,
-      processedAt: new Date(),
-    },
-  })
-  
-  // Update job progress
-  const updateData: any = {}
-  
-  if (item.tier === 'tier2') {
-    updateData.tier2Completed = { increment: 1 }
-    
-    if (needsTier3) {
-      updateData.tier3Total = { increment: 1 }
-      // Create Tier 3 queue item
-      await prisma.validationQueueItem.create({
+  try {
+    // Use transaction to ensure all operations succeed or fail together
+    await prisma.$transaction(async (tx) => {
+      // Update queue item
+      await tx.validationQueueItem.update({
+        where: { id: itemId },
         data: {
-          jobId: item.jobId,
-          citationId: item.citationId,
-          citationIndex: item.citationIndex,
-          tier: 'tier3',
-          status: 'pending',
+          status: 'completed',
+          result: result as any,
+          processedAt: new Date(),
         },
       })
-    }
-  } else if (item.tier === 'tier3') {
-    updateData.tier3Completed = { increment: 1 }
-  }
-  
-  // Update job with progress
-  if (Object.keys(updateData).length > 0) {
-    await prisma.validationJob.update({
-      where: { id: item.jobId },
-      data: updateData,
+      
+      // Update job progress
+      const updateData: any = {}
+      
+      if (item.tier === 'tier2') {
+        updateData.tier2Completed = { increment: 1 }
+        
+        if (needsTier3) {
+          updateData.tier3Total = { increment: 1 }
+          // Create Tier 3 queue item
+          await tx.validationQueueItem.create({
+            data: {
+              jobId: item.jobId,
+              citationId: item.citationId,
+              citationIndex: item.citationIndex,
+              tier: 'tier3',
+              status: 'pending',
+            },
+          })
+        }
+      } else if (item.tier === 'tier3') {
+        updateData.tier3Completed = { increment: 1 }
+      }
+      
+      // Update job with progress
+      if (Object.keys(updateData).length > 0) {
+        await tx.validationJob.update({
+          where: { id: item.jobId },
+          data: updateData,
+        })
+      }
     })
+    
+    // Update CitationCheck jsonData with result (outside transaction to avoid long locks)
+    // Use citationId instead of citationIndex to avoid mismatches
+    const updateSucceeded = await updateCitationInCheck(
+      item.job.checkId,
+      item.citationId,
+      result,
+      item.tier
+    )
+    
+    if (!updateSucceeded) {
+      // Citation update failed - mark queue item as failed for retry
+      console.error(`[markQueueItemCompleted] Failed to update citation ${item.citationId}, marking queue item as failed`)
+      await markQueueItemFailed(
+        itemId,
+        `Failed to update citation in jsonData: citation update returned false`
+      )
+      throw new Error(`Failed to update citation ${item.citationId} in check ${item.job.checkId}`)
+    }
+    
+    // Verify citation was actually updated (Fix 3: Verification Step)
+    const verificationSucceeded = await verifyCitationUpdate(
+      item.job.checkId,
+      item.citationId,
+      item.tier
+    )
+    
+    if (!verificationSucceeded) {
+      // Verification failed - mark queue item as failed for retry
+      console.error(`[markQueueItemCompleted] Verification failed for citation ${item.citationId}, marking queue item as failed`)
+      await markQueueItemFailed(
+        itemId,
+        `Verification failed: citation does not have ${item.tier} validation after update`
+      )
+      throw new Error(`Verification failed for citation ${item.citationId}`)
+    }
+    
+    console.log(`[markQueueItemCompleted] Successfully completed queue item ${itemId} for citation ${item.citationId}`)
+  } catch (error) {
+    // If any step fails, mark as failed for retry
+    console.error(`[markQueueItemCompleted] Error completing queue item ${itemId}:`, error)
+    await markQueueItemFailed(
+      itemId,
+      error instanceof Error ? error.message : String(error)
+    )
+    throw error // Re-throw to let caller know it failed
   }
-  
-  // Update CitationCheck jsonData with result
-  await updateCitationInCheck(item.job.checkId, item.citationIndex, result, item.tier)
 }
 
 /**
@@ -172,56 +311,378 @@ export async function markQueueItemFailed(
 
 /**
  * Update citation result in CitationCheck jsonData
+ * Uses citationId instead of citationIndex to avoid index mismatches
+ * Returns true if update succeeded, false otherwise
  */
 async function updateCitationInCheck(
   checkId: string,
-  citationIndex: number,
+  citationId: string,
   result: any,
   tier: string
-): Promise<void> {
-  const check = await prisma.citationCheck.findUnique({
-    where: { id: checkId },
-  })
-  
-  if (!check?.jsonData) return
-  
-  const jsonData = check.jsonData as any
-  const citations = jsonData.document?.citations || []
-  
-  if (citations[citationIndex]) {
-    if (tier === 'tier2') {
-      citations[citationIndex].validation = result
-    } else if (tier === 'tier3') {
-      citations[citationIndex].tier_3 = result
-    }
-    
-    await prisma.citationCheck.update({
-      where: { id: checkId },
-      data: {
-        jsonData: jsonData as any,
-      },
+): Promise<boolean> {
+  try {
+    // Use transaction to prevent race conditions
+    return await prisma.$transaction(async (tx) => {
+      const check = await tx.citationCheck.findUnique({
+        where: { id: checkId },
+      })
+      
+      if (!check?.jsonData) {
+        console.error(`[updateCitationInCheck] Check ${checkId} has no jsonData`)
+        return false
+      }
+      
+      const jsonData = check.jsonData as any
+      const citations = jsonData.document?.citations || []
+      
+      // Find citation by ID instead of index to avoid mismatches
+      const citationIndex = citations.findIndex((c: any) => c.id === citationId)
+      
+      if (citationIndex === -1) {
+        console.error(`[updateCitationInCheck] Citation ${citationId} not found in check ${checkId}`)
+        return false
+      }
+      
+      const citation = citations[citationIndex]
+      
+      // Idempotency check: if citation already has validation for this tier, skip update
+      if (tier === 'tier2' && citation.validation) {
+        console.warn(`[updateCitationInCheck] Citation ${citationId} already has validation, skipping update`)
+        return true // Consider it successful since validation already exists
+      }
+      if (tier === 'tier3' && citation.tier_3) {
+        console.warn(`[updateCitationInCheck] Citation ${citationId} already has tier_3, skipping update`)
+        return true // Consider it successful since tier_3 already exists
+      }
+      
+      // Update citation
+      if (tier === 'tier2') {
+        citations[citationIndex].validation = result
+        // Clear Tier 3 if it's no longer needed (when tier_3_trigger becomes false)
+        if (!result?.consensus?.tier_3_trigger) {
+          citations[citationIndex].tier_3 = null
+        }
+      } else if (tier === 'tier3') {
+        citations[citationIndex].tier_3 = result
+      }
+      
+      // Update with transaction to ensure atomicity
+      await tx.citationCheck.update({
+        where: { id: checkId },
+        data: {
+          jsonData: jsonData as any,
+        },
+      })
+      
+      console.log(`[updateCitationInCheck] Successfully updated citation ${citationId} (tier: ${tier}) in check ${checkId}`)
+      return true
     })
+  } catch (error) {
+    console.error(`[updateCitationInCheck] Error updating citation ${citationId} in check ${checkId}:`, error)
+    return false
   }
 }
 
 /**
- * Check if job is complete and update status
+ * Verify that citation has validation data after update
  */
-export async function checkJobCompletion(jobId: string): Promise<boolean> {
+async function verifyCitationUpdate(
+  checkId: string,
+  citationId: string,
+  tier: string
+): Promise<boolean> {
+  try {
+    const check = await prisma.citationCheck.findUnique({
+      where: { id: checkId },
+    })
+    
+    if (!check?.jsonData) return false
+    
+    const jsonData = check.jsonData as any
+    const citations = jsonData.document?.citations || []
+    const citation = citations.find((c: any) => c.id === citationId)
+    
+    if (!citation) return false
+    
+    if (tier === 'tier2') {
+      return !!citation.validation
+    } else if (tier === 'tier3') {
+      return !!citation.tier_3
+    }
+    
+    return false
+  } catch (error) {
+    console.error(`[verifyCitationUpdate] Error verifying citation ${citationId}:`, error)
+    return false
+  }
+}
+
+/**
+ * Retry unvalidated citations up to 3 times
+ * Enhanced to handle both Tier 2 and Tier 3 citations
+ */
+export async function retryUnvalidatedCitations(jobId: string): Promise<number> {
   const job = await prisma.validationJob.findUnique({
     where: { id: jobId },
     include: {
+      check: true,
+      queueItems: true,
+    },
+  })
+  
+  if (!job || !job.check?.jsonData) return 0
+  
+  const jsonData = job.check.jsonData as any
+  const citations = jsonData.document?.citations || []
+  
+  let retryCount = 0
+  
+  // Check each citation for missing validation
+  for (let i = 0; i < citations.length; i++) {
+    const citation = citations[i]
+    const citationId = citation.id
+    
+    // ===== TIER 2 VALIDATION CHECKS =====
+    const tier2Item = job.queueItems.find(
+      item => item.citationId === citationId && item.tier === 'tier2'
+    )
+    
+    const hasTier2Validation = !!citation.validation
+    
+    // Skip if citation already has validation and queue item is completed
+    if (hasTier2Validation && tier2Item?.status === 'completed') {
+      // Check if Tier 3 is needed
+      const needsTier3 = citation.validation?.consensus?.tier_3_trigger === true
+      const hasTier3 = !!citation.tier_3
+      
+      if (needsTier3 && !hasTier3) {
+        // Citation needs Tier 3 but doesn't have it - check Tier 3 queue item
+        const tier3Item = job.queueItems.find(
+          item => item.citationId === citationId && item.tier === 'tier3'
+        )
+        
+        // If no Tier 3 item exists, create one
+        if (!tier3Item) {
+          await prisma.validationQueueItem.create({
+            data: {
+              jobId: job.id,
+              citationId: citationId,
+              citationIndex: i,
+              tier: 'tier3',
+              status: 'pending',
+              retryCount: 0,
+            },
+          })
+          retryCount++
+          console.log(`[retry] Creating Tier 3 queue item for citation ${citationId}`)
+          continue
+        }
+        
+        // If Tier 3 item exists but is failed/stuck, retry it
+        if (tier3Item.status === 'failed' && tier3Item.retryCount < 3) {
+          await prisma.validationQueueItem.update({
+            where: { id: tier3Item.id },
+            data: {
+              status: 'pending',
+              error: null,
+              updatedAt: new Date(),
+            },
+          })
+          retryCount++
+          console.log(`[retry] Retrying Tier 3 for citation ${citationId} (attempt ${tier3Item.retryCount + 1}/3)`)
+          continue
+        }
+        
+        // If Tier 3 item is stuck in processing
+        if (tier3Item.status === 'processing') {
+          const processingTime = Date.now() - tier3Item.updatedAt.getTime()
+          if (processingTime > PROCESSING_TIMEOUT_MS) {
+            await prisma.validationQueueItem.update({
+              where: { id: tier3Item.id },
+              data: {
+                status: 'pending',
+                error: 'Reset due to processing timeout',
+                updatedAt: new Date(),
+              },
+            })
+            retryCount++
+            console.log(`[retry] Resetting stuck Tier 3 item for citation ${citationId}`)
+            continue
+          }
+        }
+        
+        // If Tier 3 item is completed but citation has no tier_3, retry it
+        if (tier3Item.status === 'completed' && !hasTier3) {
+          await prisma.validationQueueItem.update({
+            where: { id: tier3Item.id },
+            data: {
+              status: 'pending',
+              error: 'Citation missing Tier 3 despite completed status',
+              retryCount: 0, // Reset retry count
+              updatedAt: new Date(),
+            },
+          })
+          retryCount++
+          console.log(`[retry] Retrying Tier 3 for citation ${citationId} - missing result`)
+          continue
+        }
+      }
+      
+      continue // Tier 2 is complete, move to next citation
+    }
+    
+    // CRITICAL: If queue item is "completed" but citation has no validation, retry it
+    if (!hasTier2Validation && tier2Item?.status === 'completed') {
+      console.warn(`[retry] Found completed queue item for citation ${citationId} but citation has no validation - resetting for retry`)
+      await prisma.validationQueueItem.update({
+        where: { id: tier2Item.id },
+        data: {
+          status: 'pending',
+          error: 'Citation missing validation despite completed status',
+          retryCount: 0, // RESET retry count
+          updatedAt: new Date(),
+        },
+      })
+      retryCount++
+      continue
+    }
+    
+    // If item failed and retryCount < 3, reset to pending
+    if (tier2Item?.status === 'failed' && tier2Item.retryCount < 3) {
+      await prisma.validationQueueItem.update({
+        where: { id: tier2Item.id },
+        data: {
+          status: 'pending',
+          error: null,
+          updatedAt: new Date(),
+        },
+      })
+      retryCount++
+      console.log(`[retry] Retrying failed citation ${citationId} (attempt ${tier2Item.retryCount + 1}/3)`)
+      continue
+    }
+    
+    // If item is stuck in processing, reset it
+    if (tier2Item?.status === 'processing') {
+      const processingTime = Date.now() - tier2Item.updatedAt.getTime()
+      if (processingTime > PROCESSING_TIMEOUT_MS) {
+        console.warn(`[retry] Found stuck processing item for citation ${citationId} - resetting`)
+        await prisma.validationQueueItem.update({
+          where: { id: tier2Item.id },
+          data: {
+            status: 'pending',
+            error: 'Reset due to processing timeout',
+            updatedAt: new Date(),
+          },
+        })
+        retryCount++
+        continue
+      }
+    }
+    
+    // If citation has no validation and no queue item exists, create one
+    if (!hasTier2Validation && !tier2Item) {
+      await prisma.validationQueueItem.create({
+        data: {
+          jobId: job.id,
+          citationId: citationId,
+          citationIndex: i,
+          tier: 'tier2',
+          status: 'pending',
+          retryCount: 0,
+        },
+      })
+      retryCount++
+      console.log(`[retry] Creating new queue item for unvalidated citation ${citationId}`)
+    }
+  }
+  
+  if (retryCount > 0) {
+    console.log(`[retry] Retrying ${retryCount} unvalidated citations for job ${jobId}`)
+  }
+  
+  return retryCount
+}
+
+/**
+ * Check if job is complete and update status
+ * Also retries unvalidated citations if job appears complete
+ * Enhanced to prevent completion with unvalidated citations
+ */
+export async function checkJobCompletion(jobId: string): Promise<boolean> {
+  // Reset stuck processing items first
+  await resetStuckProcessingItems()
+  
+  const job = await prisma.validationJob.findUnique({
+    where: { id: jobId },
+    include: {
+      check: true,
       queueItems: true,
     },
   })
   
   if (!job) return false
   
-  const pendingItems = job.queueItems.filter(item => 
+  // Refresh queue items after reset
+  const refreshedQueueItems = await prisma.validationQueueItem.findMany({
+    where: { jobId: jobId },
+  })
+  
+  const pendingItems = refreshedQueueItems.filter(item => 
     item.status === 'pending' || item.status === 'processing'
   )
   
   if (pendingItems.length === 0) {
+    // Check for unvalidated citations and retry them (up to 3 times)
+    const retriedCount = await retryUnvalidatedCitations(jobId)
+    
+    if (retriedCount > 0) {
+      // Job is not complete - citations are being retried
+      console.log(`[checkJobCompletion] Job ${jobId} has ${retriedCount} citations being retried`)
+      return false
+    }
+    
+    // Verify all citations are actually validated
+    if (job.check?.jsonData) {
+      const jsonData = job.check.jsonData as any
+      const citations = jsonData.document?.citations || []
+      
+      // Check for missing Tier 2 validation
+      const unvalidatedTier2 = citations.filter((c: any) => !c.validation).length
+      
+      // Check for missing Tier 3 when needed
+      const unvalidatedTier3 = citations.filter((c: any) => 
+        c.validation?.consensus?.tier_3_trigger === true && !c.tier_3
+      ).length
+      
+      const totalUnvalidated = unvalidatedTier2 + unvalidatedTier3
+      
+      if (totalUnvalidated > 0) {
+        console.warn(`[checkJobCompletion] Job ${jobId} appears complete but ${totalUnvalidated} citations are missing validation (Tier 2: ${unvalidatedTier2}, Tier 3: ${unvalidatedTier3})`)
+        
+        // DON'T mark as complete - return false to allow more retries
+        // Only mark as complete if we've exhausted all retry attempts
+        const maxRetriesReached = refreshedQueueItems.every(item => 
+          item.status === 'failed' ? item.retryCount >= 3 : true
+        )
+        
+        if (!maxRetriesReached) {
+          return false // Still have retries available
+        }
+        
+        // Max retries reached - mark as failed instead of complete
+        await prisma.validationJob.update({
+          where: { id: jobId },
+          data: {
+            status: 'failed',
+            error: `${totalUnvalidated} citations could not be validated after max retries (Tier 2: ${unvalidatedTier2}, Tier 3: ${unvalidatedTier3})`,
+          },
+        })
+        return false
+      }
+    }
+    
+    // All citations validated
     await prisma.validationJob.update({
       where: { id: jobId },
       data: {
@@ -236,6 +697,7 @@ export async function checkJobCompletion(jobId: string): Promise<boolean> {
       },
     })
     
+    console.log(`[checkJobCompletion] Job ${jobId} marked as completed`)
     return true
   }
   

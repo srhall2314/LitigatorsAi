@@ -5,6 +5,7 @@ import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
 import { AnalysisStatistics, CitationDocument, Citation, CitationValidation, Tier3Verdict, Tier3FinalStatus, ValidationVerdict, AgreementLevel } from "@/types/citation-json"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
+import { isNewFormatCitationValidation, isNewFormatTier3Result } from "@/lib/citation-identification/format-helpers"
 import { prisma } from "@/lib/prisma"
 
 async function getAnalysisData(): Promise<AnalysisStatistics | null> {
@@ -170,18 +171,24 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
             documentHasAllThreeTiers = false
           } else {
             // Count invalid citations
-            // Invalid if: Tier 3 final_status is FAIL or WARN
+            // Invalid if: Tier 3 final_risk_level is NEEDS_ADDITIONAL_REVIEW or MODERATE_RISK (new format)
             // OR if Tier 2 consensus flagged it but no Tier 3 yet (shouldn't happen if completed)
             if (hasTier3 && citation.tier_3) {
-              const tier3Status = getTier3FinalStatus(citation.tier_3)
-              if (tier3Status === 'FAIL' || tier3Status === 'WARN') {
+              const tier3Consensus = citation.tier_3.consensus
+              if (tier3Consensus?.final_risk_level === 'NEEDS_ADDITIONAL_REVIEW' || tier3Consensus?.final_risk_level === 'MODERATE_RISK') {
                 documentInvalidCount++
+              } else {
+                // Fallback to legacy format (shouldn't happen for new format)
+                const tier3Status = getTier3FinalStatus(citation.tier_3)
+                if (tier3Status === 'FAIL' || tier3Status === 'WARN') {
+                  documentInvalidCount++
+                }
               }
             }
 
-            // Count Tier 2 validated citations - citations where consensus recommendation is CITATION_LIKELY_VALID
+            // Count Tier 2 validated citations - citations where average_score >= 8.0 (new format)
             if (hasTier2 && citation.validation && citation.validation.consensus) {
-              if (citation.validation.consensus.recommendation === 'CITATION_LIKELY_VALID') {
+              if (typeof citation.validation.consensus.average_score === 'number' && citation.validation.consensus.average_score >= 8.0) {
                 documentTier2ValidatedCount++
               }
             }
@@ -191,24 +198,30 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
               documentTier3RunsCount++
             }
 
-            // Count Tier 3 validated citations - citations where Tier 3 final_status is VALID
+            // Count Tier 3 validated citations - citations where Tier 3 final_risk_level is LOW_RISK (new format)
             if (hasTier3 && citation.tier_3) {
-              const tier3Status = getTier3FinalStatus(citation.tier_3)
-              if (tier3Status === 'VALID') {
+              const tier3Consensus = citation.tier_3.consensus
+              if (tier3Consensus?.final_risk_level === 'LOW_RISK') {
                 documentTier3ValidatedCount++
+              } else {
+                // Fallback to legacy format (shouldn't happen for new format)
+                const tier3Status = getTier3FinalStatus(citation.tier_3)
+                if (tier3Status === 'VALID') {
+                  documentTier3ValidatedCount++
+                }
               }
             }
 
-            // Count Tier 2 citations with 5/5 VALID votes in completed documents
+            // Count Tier 2 citations with 5/5 high confidence scores (>= 8) in completed documents
             // Only count if citation actually has Tier 2 validation data
             if (hasTier2 && citation.validation && citation.validation.panel_evaluation) {
-              const validCount = citation.validation.panel_evaluation.filter(e => e.verdict === 'VALID').length
+              const highConfidenceCount = citation.validation.panel_evaluation.filter(e => typeof e.score === 'number' && e.score >= 8).length
               // Track distribution temporarily (only add if document completes)
-              if (citation.validation.panel_evaluation.length === 5 && validCount >= 0 && validCount <= 5) {
-                documentDistribution[validCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              if (citation.validation.panel_evaluation.length === 5 && highConfidenceCount >= 0 && highConfidenceCount <= 5) {
+                documentDistribution[highConfidenceCount as 0 | 1 | 2 | 3 | 4 | 5]++
               }
-              // Only count if exactly 5 agents voted VALID
-              if (validCount === 5 && citation.validation.panel_evaluation.length === 5) {
+              // Only count if exactly 5 agents gave high confidence scores (>= 8)
+              if (highConfidenceCount === 5 && citation.validation.panel_evaluation.length === 5) {
                 documentTier2Unanimous5of5Count++
               }
             }
@@ -231,12 +244,22 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
         }
 
         for (const citation of document.citations as Citation[]) {
+          // Skip citations that don't have new format data (analysis page only works on new data)
+          const hasTier2 = citation.validation !== null && citation.validation !== undefined
+          const hasTier3 = citation.tier_3 !== null && citation.tier_3 !== undefined
+          
+          // If citation has Tier 2 or Tier 3 data, check if it's new format
+          if (hasTier2 && !isNewFormatCitationValidation(citation.validation)) {
+            continue // Skip old format citations
+          }
+          if (hasTier3 && !isNewFormatTier3Result(citation.tier_3)) {
+            continue // Skip old format Tier 3 results
+          }
+          
           totalCitations++
           
           // Check completion status
           const hasTier1 = citation.tier_1 !== null && citation.tier_1 !== undefined
-          const hasTier2 = citation.validation !== null && citation.validation !== undefined
-          const hasTier3 = citation.tier_3 !== null && citation.tier_3 !== undefined
 
           if (hasTier1) citationsWithTier1++
           if (hasTier2) citationsWithTier2++
@@ -250,14 +273,20 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
             stats.completion.allThreeTiers++
           }
 
-          // Process Tier 2 validation data
+          // Process Tier 2 validation data (new format only - scores instead of verdicts)
           if (hasTier2 && citation.validation) {
             const validation = citation.validation as CitationValidation
             
-            // Count votes
-            const validCount = validation.panel_evaluation?.filter(e => e.verdict === 'VALID').length || 0
-            const invalidCount = validation.panel_evaluation?.filter(e => e.verdict === 'INVALID').length || 0
-            const uncertainCount = validation.panel_evaluation?.filter(e => e.verdict === 'UNCERTAIN').length || 0
+            // New format: count scores instead of verdicts
+            // Count how many agents gave scores >= 8 (high confidence), < 5 (low confidence), or 5-7 (moderate)
+            const highConfidenceCount = validation.panel_evaluation?.filter(e => typeof e.score === 'number' && e.score >= 8).length || 0
+            const lowConfidenceCount = validation.panel_evaluation?.filter(e => typeof e.score === 'number' && e.score < 5).length || 0
+            const moderateConfidenceCount = validation.panel_evaluation?.filter(e => typeof e.score === 'number' && e.score >= 5 && e.score < 8).length || 0
+            
+            // Map to legacy vote distribution structure for compatibility
+            const validCount = highConfidenceCount
+            const invalidCount = lowConfidenceCount
+            const uncertainCount = moderateConfidenceCount
 
             // Update vote distributions
             if (validCount >= 0 && validCount <= 5) {
@@ -285,8 +314,12 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
                 stats.tier2Voting.agreementLevels.split++
               }
 
-              // Track confidence scores
-              if (validation.consensus.confidence_score !== undefined) {
+              // Track confidence scores (new format: use average_score, fallback to confidence_score)
+              if (typeof validation.consensus.average_score === 'number') {
+                // Map average_score (1-10) to confidence (0-1) for compatibility
+                totalTier2Confidence += validation.consensus.average_score / 10
+                tier2ConfidenceCount++
+              } else if (validation.consensus.confidence_score !== undefined) {
                 totalTier2Confidence += validation.consensus.confidence_score
                 tier2ConfidenceCount++
               }
@@ -297,27 +330,40 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
               }
             }
 
-            // Track agent-specific statistics
+            // Track agent-specific statistics (new format: use scores)
             if (validation.panel_evaluation) {
               for (const eval_ of validation.panel_evaluation) {
                 const agentName = eval_.agent
                 if (stats.agentAgreement.agentStats[agentName]) {
-                  if (eval_.verdict === 'VALID') {
-                    stats.agentAgreement.agentStats[agentName].valid++
-                  } else if (eval_.verdict === 'INVALID') {
-                    stats.agentAgreement.agentStats[agentName].invalid++
-                  } else if (eval_.verdict === 'UNCERTAIN') {
-                    stats.agentAgreement.agentStats[agentName].uncertain++
+                  // New format: map scores to valid/invalid/uncertain categories
+                  if (typeof eval_.score === 'number') {
+                    if (eval_.score >= 8) {
+                      stats.agentAgreement.agentStats[agentName].valid++
+                    } else if (eval_.score < 5) {
+                      stats.agentAgreement.agentStats[agentName].invalid++
+                    } else {
+                      stats.agentAgreement.agentStats[agentName].uncertain++
+                    }
                   }
                 }
               }
 
               // Calculate pairwise agreement (symmetric matrix)
+              // New format: consider agents in agreement if scores are within 2 points
               for (let i = 0; i < validation.panel_evaluation.length; i++) {
                 for (let j = i + 1; j < validation.panel_evaluation.length; j++) {
                   const agent1 = validation.panel_evaluation[i].agent
                   const agent2 = validation.panel_evaluation[j].agent
-                  if (validation.panel_evaluation[i].verdict === validation.panel_evaluation[j].verdict) {
+                  const score1 = validation.panel_evaluation[i].score
+                  const score2 = validation.panel_evaluation[j].score
+                  
+                  // Check if agents agree (scores within 2 points, or both in same category)
+                  let agreed = false
+                  if (typeof score1 === 'number' && typeof score2 === 'number') {
+                    agreed = Math.abs(score1 - score2) <= 2
+                  }
+                  
+                  if (agreed) {
                     // Update both directions for symmetric matrix
                     if (stats.agentAgreement.pairwiseMatrix[agent1] && stats.agentAgreement.pairwiseMatrix[agent1][agent2] !== undefined) {
                       stats.agentAgreement.pairwiseMatrix[agent1][agent2]++
@@ -331,29 +377,35 @@ async function getAnalysisData(): Promise<AnalysisStatistics | null> {
             }
           }
 
-          // Process Tier 3 data
+          // Process Tier 3 data (new format: risk levels)
           if (hasTier3 && citation.tier_3) {
             stats.tier3Validation.analyzed++
             
-            // Check if this Tier 3 citation had unanimous 5/5 VALID votes in Tier 2
+            // Check if this Tier 3 citation had unanimous 5/5 high confidence scores (>= 8) in Tier 2
             if (hasTier2 && citation.validation) {
-              const validCount = citation.validation.panel_evaluation?.filter(e => e.verdict === 'VALID').length || 0
-              if (validCount === 5) {
+              const highConfidenceCount = citation.validation.panel_evaluation?.filter(e => typeof e.score === 'number' && e.score >= 8).length || 0
+              if (highConfidenceCount === 5) {
                 stats.tier3Validation.tier3WithUnanimousTier2++
               }
             }
             
-            // Track Tier 3 verdicts (new format)
-            const tier3Status = getTier3FinalStatus(citation.tier_3)
-            if (tier3Status && stats.tier3Validation.verdicts[tier3Status] !== undefined) {
-              stats.tier3Validation.verdicts[tier3Status]++
-            }
-            
-            // Track legacy verdicts for backward compatibility
-            if (citation.tier_3.verdict && stats.tier3Validation.legacyVerdicts) {
-              const legacyVerdict = citation.tier_3.verdict as Tier3Verdict
-              if (stats.tier3Validation.legacyVerdicts[legacyVerdict] !== undefined) {
-                stats.tier3Validation.legacyVerdicts[legacyVerdict]++
+            // Track Tier 3 risk levels (new format)
+            const tier3Consensus = citation.tier_3.consensus
+            if (tier3Consensus?.final_risk_level) {
+              // Map risk levels to legacy verdict structure for compatibility
+              const riskLevel = tier3Consensus.final_risk_level
+              if (riskLevel === 'LOW_RISK') {
+                stats.tier3Validation.verdicts.VALID++
+              } else if (riskLevel === 'MODERATE_RISK') {
+                stats.tier3Validation.verdicts.WARN++
+              } else if (riskLevel === 'NEEDS_ADDITIONAL_REVIEW') {
+                stats.tier3Validation.verdicts.FAIL++
+              }
+            } else {
+              // Fallback to legacy format mapping (shouldn't happen for new format, but be safe)
+              const tier3Status = getTier3FinalStatus(citation.tier_3)
+              if (tier3Status && stats.tier3Validation.verdicts[tier3Status] !== undefined) {
+                stats.tier3Validation.verdicts[tier3Status]++
               }
             }
 

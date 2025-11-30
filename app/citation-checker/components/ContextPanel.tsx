@@ -92,11 +92,11 @@ export function ContextPanel({
             <div className="text-xs font-medium text-gray-500 mb-2">Validation Results</div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-xs text-gray-600">Valid</div>
+                <div className="text-xs text-gray-600">Low Risk</div>
                 <div className="text-lg font-bold text-green-600">{validationResults.valid}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-600">Invalid/Flagged</div>
+                <div className="text-xs text-gray-600">Needs Review</div>
                 <div className="text-lg font-bold text-red-600">{validationResults.invalid}</div>
               </div>
             </div>

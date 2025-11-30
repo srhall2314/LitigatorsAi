@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { ContextPanel } from "./ContextPanel"
 import { CitationValidation, ValidationVerdict, Tier3FinalStatus } from "@/types/citation-json"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
+import { isNewFormatCitationValidation, isNewFormatTier3Result } from "@/lib/citation-identification/format-helpers"
 
 interface ReviewDiscrepanciesPageProps {
   fileId: string
@@ -204,7 +205,14 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
   }
 
   // Helper function to get color for verdict
-  const getVerdictColor = (verdict: ValidationVerdict) => {
+  const getVerdictColor = (verdict?: ValidationVerdict, score?: number) => {
+    if (typeof score === 'number') {
+      // New format: score-based
+      if (score >= 8) return "bg-green-500"
+      if (score >= 5) return "bg-yellow-500"
+      return "bg-red-500"
+    }
+    // Legacy format: verdict-based
     if (verdict === "VALID") return "bg-green-500"
     if (verdict === "INVALID") return "bg-red-500"
     return "bg-yellow-500" // UNCERTAIN
@@ -360,7 +368,8 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                           {citation.tier_3 && (() => {
                             const tier3Status = getTier3FinalStatus(citation.tier_3)
                             const tier3Consensus = citation.tier_3.consensus
-                            const validCount = tier3Consensus?.verdict_counts.VALID || 0
+                            const validCount = tier3Consensus?.risk_level_counts?.LOW_RISK || 
+                                              tier3Consensus?.verdict_counts?.VALID || 0
                             
                             if (tier3Status === "VALID") {
                               return (
@@ -473,37 +482,56 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                   <div className="mb-4">
                     <h4 className="text-sm font-semibold text-gray-900 mb-3">Panel Evaluation Results</h4>
                     <div className="space-y-3">
-                      {validation.panel_evaluation.map((agent, idx) => (
-                        <div
-                          key={idx}
-                          className="p-3 border border-gray-200 rounded-md bg-white"
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <div className={`w-4 h-4 rounded-full ${getVerdictColor(agent.verdict)}`} />
-                              <span className="text-sm font-medium text-gray-900">
-                                {getAgentDisplayName(agent.agent)}
-                              </span>
+                      {validation.panel_evaluation.map((agent, idx) => {
+                        const isNewFormat = typeof agent.score === 'number'
+                        return (
+                          <div
+                            key={idx}
+                            className="p-3 border border-gray-200 rounded-md bg-white"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-4 h-4 rounded-full ${getVerdictColor(agent.verdict, agent.score)}`} />
+                                <span className="text-sm font-medium text-gray-900">
+                                  {getAgentDisplayName(agent.agent)}
+                                </span>
+                              </div>
+                              {isNewFormat ? (
+                                <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                  (agent.score ?? 0) >= 8 ? 'bg-green-100 text-green-800' :
+                                  (agent.score ?? 0) >= 5 ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-red-100 text-red-800'
+                                }`}>
+                                  {agent.score ?? 0}/10
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                  agent.verdict === 'VALID' ? 'bg-green-100 text-green-800' :
+                                  agent.verdict === 'INVALID' ? 'bg-red-100 text-red-800' :
+                                  'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                  {agent.verdict}
+                                </span>
+                              )}
                             </div>
-                            <span className={`px-2 py-1 text-xs font-medium rounded ${
-                              agent.verdict === 'VALID' ? 'bg-green-100 text-green-800' :
-                              agent.verdict === 'INVALID' ? 'bg-red-100 text-red-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {agent.verdict}
-                            </span>
-                          </div>
-                          {(agent.invalid_reason || agent.uncertain_reason) && (
-                            <div className="mt-2 text-xs text-gray-600">
-                              <span className="font-medium">Reason: </span>
-                              <span className="italic">{agent.invalid_reason || agent.uncertain_reason}</span>
+                            {isNewFormat && agent.reasoning && (
+                              <div className="mt-2 text-xs text-gray-600">
+                                <span className="font-medium">Reasoning: </span>
+                                <span className="italic">{agent.reasoning}</span>
+                              </div>
+                            )}
+                            {!isNewFormat && (agent.invalid_reason || agent.uncertain_reason) && (
+                              <div className="mt-2 text-xs text-gray-600">
+                                <span className="font-medium">Reason: </span>
+                                <span className="italic">{agent.invalid_reason || agent.uncertain_reason}</span>
+                              </div>
+                            )}
+                            <div className="mt-1 text-xs text-gray-500">
+                              Model: {agent.model} • {new Date(agent.timestamp).toLocaleString()}
                             </div>
-                          )}
-                          <div className="mt-1 text-xs text-gray-500">
-                            Model: {agent.model} • {new Date(agent.timestamp).toLocaleString()}
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
 
@@ -631,15 +659,43 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                   <div className="p-3 bg-gray-50 rounded-md">
                     <div className="text-xs font-medium text-gray-600 mb-2">Verdict Summary</div>
                     <div className="flex items-center gap-4 text-sm">
-                      <span className="text-green-700">
-                        <span className="font-semibold">{consensus.verdict_counts.VALID}</span> Valid
-                      </span>
-                      <span className="text-yellow-700">
-                        <span className="font-semibold">{consensus.verdict_counts.UNCERTAIN}</span> Uncertain
-                      </span>
-                      <span className="text-red-700">
-                        <span className="font-semibold">{consensus.verdict_counts.INVALID}</span> Invalid
-                      </span>
+                      {citation.tier_3?.consensus?.risk_level_counts ? (
+                        <>
+                          <span className="text-green-700">
+                            <span className="font-semibold">{citation.tier_3.consensus.risk_level_counts.LOW_RISK}</span> Low Risk
+                          </span>
+                          <span className="text-yellow-700">
+                            <span className="font-semibold">{citation.tier_3.consensus.risk_level_counts.MODERATE_RISK}</span> Moderate Risk
+                          </span>
+                          <span className="text-red-700">
+                            <span className="font-semibold">{citation.tier_3.consensus.risk_level_counts.NEEDS_ADDITIONAL_REVIEW}</span> Needs Review
+                          </span>
+                        </>
+                      ) : citation.tier_3?.consensus?.verdict_counts ? (
+                        <>
+                          <span className="text-green-700">
+                            <span className="font-semibold">{citation.tier_3.consensus.verdict_counts.VALID}</span> Valid
+                          </span>
+                          <span className="text-yellow-700">
+                            <span className="font-semibold">{citation.tier_3.consensus.verdict_counts.UNCERTAIN}</span> Uncertain
+                          </span>
+                          <span className="text-red-700">
+                            <span className="font-semibold">{citation.tier_3.consensus.verdict_counts.INVALID}</span> Invalid
+                          </span>
+                        </>
+                      ) : consensus.verdict_counts ? (
+                        <>
+                          <span className="text-green-700">
+                            <span className="font-semibold">{consensus.verdict_counts.VALID}</span> Valid
+                          </span>
+                          <span className="text-yellow-700">
+                            <span className="font-semibold">{consensus.verdict_counts.UNCERTAIN}</span> Uncertain
+                          </span>
+                          <span className="text-red-700">
+                            <span className="font-semibold">{consensus.verdict_counts.INVALID}</span> Invalid
+                          </span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>

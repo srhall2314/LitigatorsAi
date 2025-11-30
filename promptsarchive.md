@@ -8,66 +8,21 @@ This document contains the current prompts used by all Tier 2 and Tier 3 validat
 
 **Model Used**: Claude Haiku 4.5 (`claude-haiku-4-5-20251001`)
 
-Tier 2 uses a panel of **5 agents** (3 specialist agents and 2 generalist agents).  
+Tier 2 uses a panel of **3 specialist agents** and **2 generalist agents**.  
 Their job is NOT to determine validity definitively, but to provide **cheap, diverse signals** so Tier 3 is only invoked when needed.
 
-### New Methodology: Numeric Scoring (1-10)
+Tier 2 agents should flag:
+- Clear structural impossibilities
+- Clear temporal/historical impossibilities
+- Clear party-ecology impossibilities
+- Clear cross-dimensional contradictions
 
-Tier 2 agents now provide **numeric confidence scores from 1-10**, where:
-- **10** = Completely certain the citation is real (all checks pass perfectly)
-- **8-9** = Very confident the citation is real (minor uncertainties)
-- **6-7** = Moderately confident (some unusual aspects but likely real)
-- **4-5** = Uncertain (significant concerns but not clearly impossible)
-- **2-3** = Low confidence (clear problems but not definitively impossible)
-- **1** = Very low confidence (major structural impossibilities)
-
-**Higher scores indicate higher certainty that the citation is real.**
-
-### Tier 3 Escalation Logic (Code-Based Gating)
-
-Tier 3 escalation is **code-based** (not LLM decision), using statistical analysis of the 5 agent scores.
-
-**Escalation Criteria:**
-A citation escalates to Tier 3 if **EITHER** condition is met:
-- **High Variance**: `standard_deviation > 2.0` (indicates significant panel disagreement)
-- **Low Average Score**: `average_score < 6.0` (indicates low overall confidence)
-
-**Scoring Bands for T2 Gating:**
-
-| Average Score Range | Escalation Status | Interpretation |
-|---------------------|-------------------|----------------|
-| **8.0 - 10.0** | ❌ No escalation | High confidence - citation likely valid |
-| **6.0 - 7.9** | ❌ No escalation | Moderate confidence - citation uncertain but not escalated |
-| **5.0 - 5.9** | ✅ **Escalates** | Low confidence - triggers Tier 3 review |
-| **1.0 - 4.9** | ✅ **Escalates** | Very low confidence - triggers Tier 3 review |
-
-**Variance-Based Escalation:**
-- **Standard Deviation ≤ 1.0**: Unanimous agreement - no escalation
-- **Standard Deviation 1.1 - 2.0**: Strong agreement - no escalation
-- **Standard Deviation > 2.0**: High disagreement - **escalates to Tier 3** (regardless of average score)
-
-**Examples:**
-- Scores: [9, 9, 8, 9, 8] → Avg: 8.6, σ: 0.49 → ✅ No escalation (high confidence, low variance)
-- Scores: [7, 6, 7, 6, 7] → Avg: 6.6, σ: 0.49 → ❌ No escalation (moderate confidence, low variance)
-- Scores: [5, 5, 6, 5, 5] → Avg: 5.2, σ: 0.40 → ✅ **Escalates** (low average < 6.0)
-- Scores: [9, 3, 8, 2, 9] → Avg: 6.2, σ: 3.19 → ✅ **Escalates** (high variance > 2.0, despite avg > 6.0)
-
-### Consensus Calculation
-
-The system calculates:
-- **Average score**: Mean of all 5 agent scores
-- **Variance**: Variance of scores
-- **Standard deviation**: Square root of variance
-- **Agreement level**: Based on standard deviation
-  - `unanimous`: σ ≤ 1.0
-  - `strong`: σ ≤ 2.0
-  - `split`: σ > 2.0
-
-### Recommendation Mapping
-
-- **CITATION_LIKELY_VALID**: Average score ≥ 8.0
-- **CITATION_UNCERTAIN**: 5.0 ≤ Average score < 8.0
-- **CITATION_LIKELY_HALLUCINATED**: Average score < 5.0
+Tier 2 agents should NOT flag:
+- Generic names
+- Boring names
+- “Too perfect fit”
+- Vibes or gestalt suspicion
+- Subtle hallucination patterns (Tier 3 does this)
 
 Tier 2 uses the following five agents:
 
@@ -100,19 +55,26 @@ Evaluate STRICTLY:
 - Is the page number within normal range?
 - Did this court exist during that time?
 
-Provide a confidence score from 1-10 where:
-- 10 = Completely certain the citation is real (all metadata checks pass perfectly)
-- 8-9 = Very confident the citation is real (minor uncertainties)
-- 6-7 = Moderately confident (some unusual aspects but likely real)
-- 4-5 = Uncertain (significant concerns but not clearly impossible)
-- 2-3 = Low confidence (clear problems but not definitively impossible)
-- 1 = Very low confidence (major structural impossibilities)
-
-Focus on objective, structural factors. Higher scores indicate higher certainty that the citation is real.
+If metadata is normal → VALID.  
+Only clear structural impossibilities → INVALID.  
+Anything unusual but not impossible → UNCERTAIN.
 
 Respond EXACTLY with:
-SCORE: [1-10]
-REASONING: [brief explanation of your score]
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
+
+INVALID reason codes:
+- reporter_court_mismatch
+- volume_impossible
+- page_unreasonable
+- reporter_timing_wrong
+- year_implausible
+
+UNCERTAIN reason codes:
+- unusual_volume_page
+- reporter_edge_case
+- timing_questionable
 ```
 
 ---
@@ -146,19 +108,25 @@ Evaluate ONLY:
 - Does the case type (civil/criminal/admin) match the party roles?
 - Are there entity-type mismatches (e.g., federal agency litigating a local eviction case)?
 
-Provide a confidence score from 1-10 where:
-- 10 = Completely certain the citation is real (party configuration is perfectly normal)
-- 8-9 = Very confident the citation is real (minor uncertainties)
-- 6-7 = Moderately confident (some unusual aspects but likely real)
-- 4-5 = Uncertain (significant concerns but not clearly impossible)
-- 2-3 = Low confidence (clear problems but not definitively impossible)
-- 1 = Very low confidence (major party/entity mismatches)
-
-Generic names are common and should not lower the score. Higher scores indicate higher certainty that the citation is real.
+If party configuration is normal → VALID.  
+Generic names → VALID or UNCERTAIN (never INVALID).  
+INVALID only for clear mismatches.
 
 Respond EXACTLY with:
-SCORE: [1-10]
-REASONING: [brief explanation of your score]
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
+
+INVALID reason codes:
+- case_type_implausible
+- characteristics_mismatch
+- party_role_impossible
+- entity_type_impossible
+
+UNCERTAIN reason codes:
+- names_generic_but_possible
+- unusual_pairing
+- characteristics_unclear
 ```
 
 ---
@@ -193,19 +161,25 @@ Evaluate:
 - Was the legal issue relevant during that period?
 - Is the age of the authority plausible for its cited use?
 
-Provide a confidence score from 1-10 where:
-- 10 = Completely certain the citation is real (all temporal checks pass perfectly)
-- 8-9 = Very confident the citation is real (minor uncertainties)
-- 6-7 = Moderately confident (some unusual aspects but likely real)
-- 4-5 = Uncertain (significant concerns but not clearly impossible)
-- 2-3 = Low confidence (clear problems but not definitively impossible)
-- 1 = Very low confidence (major temporal impossibilities, anachronisms)
-
-Focus on objective, historical factors. Higher scores indicate higher certainty that the citation is real.
+If historically normal → VALID.  
+INVALID only for clear anachronisms.  
+Ambiguous timeline → UNCERTAIN.
 
 Respond EXACTLY with:
-SCORE: [1-10]
-REASONING: [brief explanation of your score]
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
+
+INVALID reason codes:
+- temporal_impossibility
+- anachronistic_issue
+- historical_mismatch
+- future_dated
+
+UNCERTAIN reason codes:
+- early_in_reporter_series
+- edge_of_legal_development
+- timing_unusual_but_possible
 ```
 
 ---
@@ -236,19 +210,25 @@ Evaluate ONLY:
 - Is this court an appropriate forum for this subject matter?
 - Does the general legal rule described plausibly match the authority category?
 
-Provide a confidence score from 1-10 where:
-- 10 = Completely certain the citation is real (doctrinally consistent and appropriate)
-- 8-9 = Very confident the citation is real (minor uncertainties)
-- 6-7 = Moderately confident (some unusual aspects but likely real)
-- 4-5 = Uncertain (significant concerns but not clearly impossible)
-- 2-3 = Low confidence (clear problems but not definitively impossible)
-- 1 = Very low confidence (major doctrinal impossibilities)
-
-Unfamiliarity alone should not lower the score significantly. Higher scores indicate higher certainty that the citation is real.
+If broadly consistent → VALID.  
+If clearly doctrinally impossible → INVALID.  
+If unfamiliar or unclear → UNCERTAIN (preferred).
 
 Respond EXACTLY with:
-SCORE: [1-10]
-REASONING: [brief explanation of your score]
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
+
+INVALID reason codes:
+- inconsistent_with_knowledge
+- unknown_authority
+- doctrine_impossible
+- jurisdiction_mismatch
+
+UNCERTAIN reason codes:
+- unfamiliar_but_possible
+- edge_case_authority
+- weak_signals_both_ways
 ```
 
 ---
@@ -280,69 +260,71 @@ Evaluate ONLY:
 - Are there combinations that cannot coexist (e.g., criminal statute cited as civil precedent)?
 - Is the formatting structurally incoherent in a way no specialist would handle?
 
-Provide a confidence score from 1-10 where:
-- 10 = Completely certain the citation is real (no contradictions detected)
-- 8-9 = Very confident the citation is real (minor uncertainties)
-- 6-7 = Moderately confident (some unusual aspects but likely real)
-- 4-5 = Uncertain (significant concerns but not clearly impossible)
-- 2-3 = Low confidence (clear problems but not definitively impossible)
-- 1 = Very low confidence (major cross-dimensional contradictions)
-
-Focus on objective contradictions. Higher scores indicate higher certainty that the citation is real.
+If no contradictions → VALID.  
+If contradictions are clear → INVALID.  
+If merely unusual → UNCERTAIN.
 
 Respond EXACTLY with:
-SCORE: [1-10]
-REASONING: [brief explanation of your score]
+VALID
+INVALID [reason_code]
+UNCERTAIN [reason_code]
+
+INVALID reason codes:
+- cross_dimension_contradiction
+- structural_incoherence
+- authority_category_mismatch
+- impossible_combination
+
+UNCERTAIN reason codes:
+- mixed_signals
+- insufficient_evidence
+- unusual_but_not_invalid
 ```
 
 **Model Used**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`)
 
-**Purpose**: Tier 3 is a panel of three independent agents, each with a different analytical style, for deep review of citations that failed Tier 2 consensus. Each agent investigates the FULL citation and context, attempting a risk-based assessment.
+**Purpose**: Tier 3 is a panel of three independent agents, each with a different analytical style, for deep review of citations that failed Tier 2 consensus. Each agent investigates the FULL citation and context, attempting a definitive determination of validity or fabrication.
 
-**When Used**: Citations are escalated to Tier 3 based on code-based logic:
-- High variance (standard deviation > 2.0) indicating panel disagreement, OR
-- Low average score (< 6.0) indicating low confidence
-
-**New Methodology: Risk-Based Evaluation**
-
-Tier 3 agents now assess **RISK LEVELS** instead of absolute verdicts:
-- **LOW_RISK**: Citation appears authentic and reliable. You would confidently rely on this in court.
-- **MODERATE_RISK**: Some concerns exist but citation may still be valid. Requires additional verification.
-- **NEEDS_ADDITIONAL_REVIEW**: Significant concerns suggest citation may be fabricated or incorrect. Requires human review.
-
-**Tier 3 Independence**: Tier 3 agents evaluate citations **independently** without seeing Tier 2 results. This eliminates anchoring bias and allows Tier 3 to provide fresh, unbiased assessment.
+**When Used**: Any citation that receives a split decision (3/2 or worse) from Tier 2 is escalated to Tier 3.
 
 **Global Tier 3 Instructions (applies to all three agents)**
 
 All Tier 3 agents share the same job:
 
-> You are reviewing a citation that may have concerns. Your task is to assess the RISK LEVEL that this citation may be fabricated or incorrect, using your knowledge of law and citations, the citation text, and the document context.
+> You are reviewing a citation that has already gone through a first-pass panel. Your task is to use ALL available information — your knowledge of law and citations, the citation text, the document context, and the Tier 2 panel output — to decide whether this citation is likely real and correct, likely fabricated/incorrect, or uncertain.
 
 Key rules:
 
 - Use all signals together. Consider authority existence, court/reporter/volume/page, year, court, legal topic, and how the citation is used in the document.
 - Generic or "boring" names are neutral. Common names (e.g., "Smith v. Jones") or generic-sounding parties are common in real litigation. They are not a reason by themselves to doubt the citation.
 - A good fit is positive, not suspicious. Lawyers are supposed to cite cases that strongly support their arguments. A case that fits the point well is a normal sign of good lawyering. Do NOT treat "this case fits the argument very well" as a fabrication marker by itself.
-- Do not assess as high risk solely because you don't recognize the authority. Unfamiliarity is not a reason to call something fabricated.
-- HIGH RISK requires concrete, objective problems. Only choose NEEDS_ADDITIONAL_REVIEW when you can identify at least one specific, substantive issue such as:
+- Do not invalidate solely because you don't recognize the authority. Unfamiliarity is not a reason to call something fabricated.
+- INVALID requires concrete, objective problems. Only choose INVALID when you can identify at least one specific, substantive issue such as:
   • impossible court/reporter combination
   • impossible year
   • inconsistent metadata
   • authority that clearly cannot exist
   • direct contradiction with how such authorities are actually published
-- Pattern-based concerns alone (including "too perfect fit," generic or common-sounding names, strong factual alignment, or general "AI-feel") are NOT enough for NEEDS_ADDITIONAL_REVIEW. If your concerns are primarily pattern-based, you MUST choose MODERATE_RISK.
-- You are NOT allowed to base NEEDS_ADDITIONAL_REVIEW primarily on:
+- Pattern-based concerns alone (including "too perfect fit," generic or common-sounding names, strong factual alignment, or general "AI-feel") are NOT enough for INVALID. If your concerns are primarily pattern-based, you MUST choose UNCERTAIN.
+- You are NOT allowed to base INVALID primarily on:
   • generic/common names
   • the authority being very helpful to the argument
-  If these are your only concerns → MODERATE_RISK.
-- Prefer MODERATE_RISK when information is incomplete. Do not guess.
+  If these are your only concerns → UNCERTAIN.
+- Prefer UNCERTAIN when information is incomplete. Do not guess.
 
 All Tier 3 agents must respond in this exact format:
 
 ```text
-RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
-REASONING: <2-3 sentences explaining your risk assessment>
+VERDICT: VALID | INVALID | UNCERTAIN
+REASONING: <2-3 sentences>
+INVALID_REASON: <allowed INVALID code or "N/A">
+UNCERTAIN_REASON: <allowed UNCERTAIN code or "N/A">
 ```
+
+Rules for these fields:
+- If VERDICT is VALID → INVALID_REASON and UNCERTAIN_REASON = "N/A"
+- If VERDICT is INVALID → UNCERTAIN_REASON = "N/A"
+- If VERDICT is UNCERTAIN → INVALID_REASON = "N/A"
 
 ---
 
@@ -363,7 +345,12 @@ Citation: ${citationText}
 Citation Type: ${citationType}
 Document Context: ${context}
 
-Your task is to assess the RISK LEVEL that this citation may be fabricated or incorrect.
+Tier 2 Panel Results:
+- Agreement Level: ${tier2Results.consensus.agreement_level}
+- Verdicts:
+- ${panelVerdicts}
+- Confidence Score: ${(tier2Results.consensus.confidence_score * 100).toFixed(0)}%
+- Panel Reasoning: ${tier2Results.consensus.reasoning}
 
 Use ALL of the following angles in your review:
 
@@ -389,15 +376,21 @@ Use ALL of the following angles in your review:
    - Look for concrete problems: impossible court/reporter, nonsense volume or page, clearly mismatched subject matter, etc.
    - Generic party names or a good doctrinal fit ALONE are NOT reasons to call the citation fabricated.
 
-Assess the RISK LEVEL:
-- LOW_RISK: Citation appears authentic and reliable. You would confidently rely on this in court.
-- MODERATE_RISK: Some concerns exist but citation may still be valid. Requires additional verification.
-- NEEDS_ADDITIONAL_REVIEW: Significant concerns suggest citation may be fabricated or incorrect. Requires human review.
+6. TIER 2 PANEL
+   - Consider what the Tier 2 validators thought, but make your own judgment.
+   - You may agree or disagree; you are the senior reviewer.
+
+Choose:
+- VALID if the citation appears real and appropriate to rely on.
+- INVALID if you see specific, substantive reasons to think it is fabricated or clearly wrong.
+- UNCERTAIN if you cannot confidently say valid or invalid based on the available information.
 
 Respond in exactly this format:
 
-RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
-REASONING: <2-3 sentences explaining your risk assessment in practical "would I sign this brief?" terms>
+VERDICT: VALID | INVALID | UNCERTAIN
+REASONING: <2-3 sentences explaining your assessment in practical "would I sign this brief?" terms>
+INVALID_REASON: structural_impossibility | metadata_inconsistent | authority_nonexistent | fabrication_clear | multiple_red_flags | "N/A"
+UNCERTAIN_REASON: structural_concerns | metadata_questionable | insufficient_verification | temporal_inconsistencies | requires_human_review | "N/A"
 ```
 
 **Invalid Reason Codes**:
@@ -433,7 +426,12 @@ Citation: ${citationText}
 Citation Type: ${citationType}
 Document Context: ${context}
 
-Your task is to assess the RISK LEVEL that this citation may be fabricated or incorrect.
+Tier 2 Panel Results:
+- Agreement Level: ${tier2Results.consensus.agreement_level}
+- Verdicts:
+- ${panelVerdicts}
+- Confidence Score: ${(tier2Results.consensus.confidence_score * 100).toFixed(0)}%
+- Panel Reasoning: ${tier2Results.consensus.reasoning}
 
 Use ALL of the following angles in your review:
 
@@ -459,15 +457,21 @@ Use ALL of the following angles in your review:
    - Generic or common party names are extremely common in real cases; they are neutral, not a red flag by themselves.
    - Unfamiliarity alone ("I have not seen this case before") is not a basis to call it fabricated.
 
-Assess the RISK LEVEL:
-- LOW_RISK: Citation appears to be a real, usable authority that you would sign off on.
-- MODERATE_RISK: Some concerns exist but citation may still be valid. Requires additional verification.
-- NEEDS_ADDITIONAL_REVIEW: Significant concerns suggest citation may be fabricated or incorrect. Requires human review.
+6. TIER 2 PANEL INTEGRATION
+   - Use the Tier 2 panel's disagreements as input, but do not simply follow a majority.
+   - Your task is to give the best research-driven answer you can.
+
+Choose:
+- VALID if the citation appears to be a real, usable authority that you would sign off on.
+- INVALID if you see specific, substantive reasons to think it is fabricated or clearly wrong.
+- UNCERTAIN if you cannot confidently determine validity based on the available information.
 
 Respond in exactly this format:
 
-RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
+VERDICT: VALID | INVALID | UNCERTAIN
 REASONING: <2-3 sentences explaining your assessment from a research-check perspective>
+INVALID_REASON: incoherent_synthesis | tier2_pattern_negative | fabrication_clear | context_mismatch | multiple_concerns | "N/A"
+UNCERTAIN_REASON: mixed_signals | tier2_disagreement_unresolved | context_uncertain | synthesis_unclear | requires_human_review | "N/A"
 ```
 
 **Invalid Reason Codes**:
@@ -503,7 +507,12 @@ Citation: ${citationText}
 Citation Type: ${citationType}
 Document Context: ${context}
 
-Your task is to assess the RISK LEVEL that this citation may be fabricated or incorrect.
+Tier 2 Panel Results:
+- Agreement Level: ${tier2Results.consensus.agreement_level}
+- Verdicts:
+- ${panelVerdicts}
+- Confidence Score: ${(tier2Results.consensus.confidence_score * 100).toFixed(0)}%
+- Panel Reasoning: ${tier2Results.consensus.reasoning}
 
 Use ALL of the following angles in your review:
 
@@ -525,18 +534,27 @@ Use ALL of the following angles in your review:
    - Generic party names are common and neutral, not a reason alone to doubt authenticity.
 
 5. PATTERN & FABRICATION SIGNALS
-   - Consider patterns such as impossible metadata, non-existent reporters, or mismatched issues — but you may only choose NEEDS_ADDITIONAL_REVIEW if these patterns connect to at least one concrete structural, temporal, or doctrinal problem.
-   - Pattern-based concerns (naming patterns, alignment, WL/unpublished format, unfamiliarity, or "AI-feel") may increase uncertainty but cannot, by themselves, convert a citation into NEEDS_ADDITIONAL_REVIEW; NEEDS_ADDITIONAL_REVIEW requires at least one objective defect in structure, metadata, timing, or doctrine.
+   - Consider patterns such as impossible metadata, non-existent reporters, or mismatched issues — but you may only choose INVALID if these patterns connect to at least one concrete structural, temporal, or doctrinal problem.
+   - Only treat "too perfect fit," "pattern-like naming," or other fabrication patterns as supporting evidence IF combined with at least one independent, objective red flag (e.g., metadata impossibility, temporal impossibility, contradiction in publication format).
+   - If your concerns are primarily pattern-based (generic names, strong alignment, suspicion of "AI feel") and you cannot identify a concrete, objective defect, you MUST choose:
+       VERDICT: UNCERTAIN
+       UNCERTAIN_REASON: pattern_ambiguous | mixed_authenticity_signals | some_fabrication_concerns | requires_human_review
 
-Assess the RISK LEVEL:
-- LOW_RISK: Citation appears authentic and appropriate for a court to rely on.
-- MODERATE_RISK: Some concerns exist but citation may still be valid. Requires additional verification.
-- NEEDS_ADDITIONAL_REVIEW: Significant concerns suggest citation may be fabricated or incorrect. Requires human review.
+6. TIER 2 PATTERN REVIEW
+   - Examine how the Tier 2 agents disagreed.
+   - Use their concerns as additional evidence, but make your own balanced judgment.
+
+Choose:
+- VALID if the citation appears authentic and appropriate for a court to rely on.
+- INVALID if you see clear, concrete indicators that it is fabricated or clearly incorrect.
+- UNCERTAIN if the signals are mixed or verification is incomplete.
 
 Respond in exactly this format:
 
-RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
+VERDICT: VALID | INVALID | UNCERTAIN
 REASONING: <2-3 sentences explaining your assessment from a judicial-review perspective>
+INVALID_REASON: fabrication_markers | hallucination_pattern | authenticity_gestalt_negative | ai_invention_clear | multiple_red_flags | "N/A"
+UNCERTAIN_REASON: pattern_ambiguous | mixed_authenticity_signals | gestalt_unclear | some_fabrication_concerns | requires_human_review | "N/A"
 ```
 
 **Invalid Reason Codes**:
@@ -567,23 +585,17 @@ REASONING: <2-3 sentences explaining your assessment from a judicial-review pers
 
 ### Execution Flow
 
-1. **Tier 2**: All 5 agents evaluate citations in parallel, providing numeric scores (1-10)
-2. **Consensus Calculation**: System calculates:
-   - Average score, variance, and standard deviation from 5 agent scores
-   - Agreement level based on standard deviation
-   - Recommendation based on average score
-3. **Tier 3 Escalation**: Code-based decision using:
-   - High variance (standard deviation > 2.0) OR
-   - Low average score (< 6.0)
+1. **Tier 2**: All 5 agents evaluate citations in parallel
+2. **Consensus Calculation**: System determines agreement level
+3. **Tier 3 Escalation**: Citations with split decisions (3/2 or worse) are escalated
 4. **Tier 3 Investigation**: All 3 agents investigate citations comprehensively in parallel (unlike Tier 2, they don't split investigation by dimension - all investigate fully)
-   - **Tier 3 evaluates independently** without seeing Tier 2 results (eliminates anchoring bias)
-5. **Tier 3 Consensus**: System calculates consensus from 3-agent panel risk assessments
+5. **Tier 3 Consensus**: System calculates consensus from 3-agent panel
 
 ### Response Parsing
 
-- Tier 2 responses are parsed to extract numeric score (1-10) and reasoning
-- Tier 3 responses are parsed to extract risk level (LOW_RISK/MODERATE_RISK/NEEDS_ADDITIONAL_REVIEW) and reasoning
-- Tier 3 consensus is calculated from 3-agent panel risk assessments
+- Tier 2 responses are parsed to extract verdict and reason codes
+- Tier 3 responses are parsed to extract verdict (VALID/INVALID/UNCERTAIN), reasoning, and reason codes (similar to Tier 2)
+- Tier 3 consensus is calculated from 3-agent panel evaluations
 
 ---
 

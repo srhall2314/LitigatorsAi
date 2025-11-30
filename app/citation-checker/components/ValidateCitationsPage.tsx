@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation"
 import { CitationList } from "./CitationList"
 import { ContextPanel } from "./ContextPanel"
 import { CitationValidation, ValidationVerdict } from "@/types/citation-json"
+import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
+import { isNewFormatCitationValidation, calculateRiskStatistics, getCitationRiskLevel } from "@/lib/citation-identification/format-helpers"
+import { ValidationSummary } from "./ValidationSummary"
 
 interface ValidateCitationsPageProps {
   fileId: string
@@ -47,64 +50,71 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
   })
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
-  // Load citations from check data
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        // Get file to find checkId
-        const fileRes = await fetch(`/api/citation-checker/files`)
-        if (fileRes.ok) {
-          const files = await fileRes.json()
-          const file = files.find((f: any) => f.id === fileId)
-          if (file?.citationChecks?.[0]) {
-            const currentCheckId = file.citationChecks[0].id
-            setCheckId(currentCheckId)
-            
-            // Load check data
-            const checkRes = await fetch(`/api/citation-checker/checks/${currentCheckId}`)
-            if (checkRes.ok) {
-              const data = await checkRes.json()
-              if (data.jsonData?.document?.citations) {
-                setCitations(data.jsonData.document.citations)
-                
-                // Calculate results from validation data if available
-                const validatedCitations = data.jsonData.document.citations.filter((c: any) => c.validation)
-                if (validatedCitations.length > 0) {
-                  const valid = validatedCitations.filter((c: any) => 
-                    c.validation.consensus.recommendation === "CITATION_LIKELY_VALID"
-                  ).length
-                  const invalid = validatedCitations.filter((c: any) => 
-                    c.validation.consensus.recommendation === "CITATION_LIKELY_HALLUCINATED"
-                  ).length
-                  const uncertain = validatedCitations.filter((c: any) => 
-                    c.validation.consensus.recommendation === "CITATION_UNCERTAIN"
-                  ).length
-                  
-                  setResults({
-                    valid,
-                    invalid,
-                    uncertain,
-                    total: validatedCitations.length
-                  })
-                }
-              }
-            }
+  // Shared function to load citations and results for a specific checkId
+  const loadCitationsAndResultsForCheckId = async (specificCheckId: string) => {
+    try {
+      setCheckId(specificCheckId)
+      
+      // Load check data
+      const checkRes = await fetch(`/api/citation-checker/checks/${specificCheckId}`)
+      if (checkRes.ok) {
+        const data = await checkRes.json()
+        if (data.jsonData?.document?.citations) {
+          setCitations(data.jsonData.document.citations)
+          
+          // Calculate results from validation data using risk-based utility
+          const riskStats = calculateRiskStatistics(data.jsonData.document.citations)
+          if (riskStats.total > 0) {
+            // Map risk statistics to results format for backward compatibility with UI
+            setResults({
+              valid: riskStats.lowRisk,
+              uncertain: riskStats.moderateRisk,
+              invalid: riskStats.needsReview,
+              total: riskStats.total
+            })
+          } else {
+            // No validated citations yet
+            setResults(null)
           }
         }
-      } catch (err) {
-        console.error('Failed to load citations:', err)
       }
+    } catch (err) {
+      console.error('Failed to load citations:', err)
     }
-    
-    loadData()
+  }
+
+  // Shared function to load citations and results (uses latest check from files API)
+  const loadCitationsAndResults = async () => {
+    try {
+      // Get file to find checkId
+      const fileRes = await fetch(`/api/citation-checker/files`)
+      if (fileRes.ok) {
+        const files = await fileRes.json()
+        const file = files.find((f: any) => f.id === fileId)
+        if (file?.citationChecks?.[0]) {
+          const currentCheckId = file.citationChecks[0].id
+          await loadCitationsAndResultsForCheckId(currentCheckId)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load citations:', err)
+    }
+  }
+  
+  // Load citations from check data
+  useEffect(() => {
+    loadCitationsAndResults()
   }, [fileId])
 
   const handleValidate = async () => {
+    console.log(`[ValidateCitationsPage] handleValidate called, checkId: ${checkId}, fileId: ${fileId}`)
     if (!checkId) {
+      console.error(`[ValidateCitationsPage] No checkId available`)
       alert("No citation check selected")
       return
     }
 
+    console.log(`[ValidateCitationsPage] Starting validation with checkId: ${checkId}`)
     setValidating(true)
     setProgress({
       tier2Current: 0,
@@ -115,79 +125,74 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
     })
 
     try {
-      // Start validation job
-      const response = await fetch(`/api/citation-checker/checks/${checkId}/validate-citations`, {
+      console.log(`[ValidateCitationsPage] Starting validation for checkId: ${checkId}`)
+      // Start validation job with force=true to allow rerunning (for testing new prompts)
+      const response = await fetch(`/api/citation-checker/checks/${checkId}/validate-citations?force=true`, {
         method: 'POST',
       })
+      console.log(`[ValidateCitationsPage] Response status: ${response.status}`)
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+        console.error("Validation API error:", errorData)
+        alert(`Failed to create validation job: ${errorData.error || errorData.details || `HTTP ${response.status}`}`)
+        setValidating(false)
+        return
+      }
       
       const data = await response.json()
+      console.log(`[ValidateCitationsPage] Response data:`, data)
       
       if (data.jobId) {
-        // Start polling for status
-        startPolling(data.jobId)
+        console.log(`[ValidateCitationsPage] Job ID received: ${data.jobId}, status: ${data.status}, message: ${data.message}`)
+        
+        // If a new checkId was returned (new version created), update it
+        if (data.checkId && data.checkId !== checkId) {
+          console.log(`[ValidateCitationsPage] New checkId received: ${data.checkId} (was ${checkId})`)
+          setCheckId(data.checkId)
+        }
+        
+        // If job is already completed, skip polling and just load the data
+        if (data.status === 'completed') {
+          console.log(`[ValidateCitationsPage] Job already completed, loading data directly`)
+          setValidating(false)
+          // Use the new checkId if provided, otherwise reload from files API
+          if (data.checkId) {
+            loadCitationsAndResultsForCheckId(data.checkId)
+          } else {
+            loadCitationsAndResults()
+          }
+        } else {
+          // Start polling for status
+          startPolling(data.jobId, data.checkId)
+        }
       } else if (data.error) {
-        alert(`Failed to create validation job: ${data.error}`)
+        console.error("Validation job creation error:", data)
+        alert(`Failed to create validation job: ${data.error}${data.details ? ` - ${data.details}` : ''}`)
         setValidating(false)
       } else {
-        alert('Failed to create validation job')
+        console.error("Unexpected response format:", data)
+        alert('Failed to create validation job: Unexpected response format')
         setValidating(false)
       }
     } catch (error) {
       console.error("Validation error:", error)
-      alert("Failed to start validation")
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      alert(`Failed to start validation: ${errorMessage}`)
       setValidating(false)
     }
   }
 
-  const startPolling = (jobId: string) => {
+  const startPolling = (jobId: string, newCheckId?: string) => {
     // Clear any existing polling interval
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current)
     }
     
-    const loadData = async () => {
-      try {
-        const fileRes = await fetch(`/api/citation-checker/files`)
-        if (fileRes.ok) {
-          const files = await fileRes.json()
-          const file = files.find((f: any) => f.id === fileId)
-          if (file?.citationChecks?.[0]) {
-            const currentCheckId = file.citationChecks[0].id
-            setCheckId(currentCheckId)
-            const checkRes = await fetch(`/api/citation-checker/checks/${currentCheckId}`)
-            if (checkRes.ok) {
-              const check = await checkRes.json()
-              const jsonData = check.jsonData as any
-              if (jsonData?.document?.citations) {
-                setCitations(jsonData.document.citations)
-                
-                // Calculate results
-                const validatedCitations = jsonData.document.citations.filter((c: any) => c.validation)
-                if (validatedCitations.length > 0) {
-                  const valid = validatedCitations.filter((c: any) => 
-                    c.validation?.consensus?.recommendation === "CITATION_LIKELY_VALID"
-                  ).length
-                  const invalid = validatedCitations.filter((c: any) => 
-                    c.validation?.consensus?.recommendation === "CITATION_LIKELY_HALLUCINATED"
-                  ).length
-                  const uncertain = validatedCitations.filter((c: any) => 
-                    c.validation?.consensus?.recommendation === "CITATION_UNCERTAIN"
-                  ).length
-                  
-                  setResults({
-                    valid,
-                    invalid,
-                    uncertain,
-                    total: validatedCitations.length
-                  })
-                }
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error loading data:", error)
-      }
+    // If a new checkId was provided, update it
+    if (newCheckId && newCheckId !== checkId) {
+      console.log(`[ValidateCitationsPage] Updating checkId during polling: ${newCheckId}`)
+      setCheckId(newCheckId)
     }
     
     const poll = async () => {
@@ -223,7 +228,15 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
             pollIntervalRef.current = null
           }
           setValidating(false)
-          loadData()
+          // Use checkId from job response (most reliable), fallback to newCheckId param, then reload from files API
+          const checkIdToLoad = job.checkId || newCheckId
+          if (checkIdToLoad) {
+            console.log(`[ValidateCitationsPage] Validation completed, loading data for checkId: ${checkIdToLoad}`)
+            loadCitationsAndResultsForCheckId(checkIdToLoad)
+          } else {
+            console.log(`[ValidateCitationsPage] Validation completed, reloading from files API`)
+            loadCitationsAndResults()
+          }
         } else if (job.status === 'failed') {
           if (pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current)
@@ -263,15 +276,33 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
   const renderAgentIndicators = (validation: CitationValidation) => {
     if (!validation?.panel_evaluation) return null
     
+    const isNewFormat = isNewFormatCitationValidation(validation)
+    
     return (
       <div className="flex items-center gap-1">
-        {validation.panel_evaluation.map((agent, idx) => (
-          <div
-            key={idx}
-            className={`w-3 h-3 rounded-full ${getVerdictColor(agent.verdict)}`}
-            title={`${agent.agent}: ${agent.verdict}`}
-          />
-        ))}
+        {validation.panel_evaluation.map((agent, idx) => {
+          if (isNewFormat && typeof agent.score === 'number') {
+            // New format: show score-based color
+            const scoreColor = agent.score >= 8 ? 'bg-green-500' : agent.score >= 5 ? 'bg-yellow-500' : 'bg-red-500'
+            return (
+              <div
+                key={idx}
+                className={`w-3 h-3 rounded-full ${scoreColor}`}
+                title={`${agent.agent}: ${agent.score}/10`}
+              />
+            )
+          } else if (agent.verdict) {
+            // Legacy format: show verdict-based color
+            return (
+              <div
+                key={idx}
+                className={`w-3 h-3 rounded-full ${getVerdictColor(agent.verdict)}`}
+                title={`${agent.agent}: ${agent.verdict}`}
+              />
+            )
+          }
+          return null
+        })}
       </div>
     )
   }
@@ -296,12 +327,18 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
       )}
       
       <button
-        onClick={handleValidate}
+        onClick={() => {
+          console.log(`[ValidateCitationsPage] Button clicked, checkId: ${checkId}, validating: ${validating}`)
+          handleValidate()
+        }}
         disabled={validating || !checkId}
         className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
       >
         {validating ? "Validating Citations..." : "Validate Citations"}
       </button>
+      {!checkId && (
+        <div className="text-red-600 text-sm mt-2">Warning: No check ID available. Please ensure citations have been identified first.</div>
+      )}
 
       {/* Progress Indicator */}
       {validating && progress.stage !== 'idle' && (
@@ -401,28 +438,15 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
       )}
 
       {results && (
-        <div className="mt-4 p-4 bg-gray-50 rounded-md">
-          <div className="mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Validation Summary</h3>
-            <div className="grid grid-cols-4 gap-4">
-              <div>
-                <div className="text-sm text-gray-600">Total Validated</div>
-                <div className="text-2xl font-bold text-gray-900">{results.total}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-600">Valid Citations</div>
-                <div className="text-2xl font-bold text-green-600">{results.valid}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-600">Uncertain Citations</div>
-                <div className="text-2xl font-bold text-yellow-600">{results.uncertain}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-600">Invalid Citations</div>
-                <div className="text-2xl font-bold text-red-600">{results.invalid}</div>
-              </div>
-            </div>
-          </div>
+        <div className="mt-4">
+          <ValidationSummary
+            statistics={{
+              lowRisk: results.valid,
+              moderateRisk: results.uncertain,
+              needsReview: results.invalid,
+              total: results.total
+            }}
+          />
         </div>
       )}
       
@@ -453,17 +477,16 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
                           }`}>
                             {citation.citationType?.toUpperCase() || 'UNKNOWN'}
                           </span>
-                          {hasValidation && (
-                            <span className={`px-2 py-1 text-xs font-medium rounded ${
-                              validation.consensus.recommendation === "CITATION_LIKELY_VALID" ? 'bg-green-100 text-green-800' :
-                              validation.consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? 'bg-red-100 text-red-800' :
-                              'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {validation.consensus.recommendation === "CITATION_LIKELY_VALID" ? "VALID" :
-                               validation.consensus.recommendation === "CITATION_LIKELY_HALLUCINATED" ? "INVALID" :
-                               "UNCERTAIN"}
-                            </span>
-                          )}
+                          {hasValidation && (() => {
+                            const riskLevel = getCitationRiskLevel(citation)
+                            if (riskLevel === 'LOW_RISK') {
+                              return <span className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800">LOW RISK</span>
+                            } else if (riskLevel === 'NEEDS_ADDITIONAL_REVIEW') {
+                              return <span className="px-2 py-1 text-xs font-medium rounded bg-red-100 text-red-800">NEEDS REVIEW</span>
+                            } else {
+                              return <span className="px-2 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-800">MODERATE RISK</span>
+                            }
+                          })()}
                         </div>
                         <p className="text-sm text-gray-700 mb-2">{citation.citationText || citation.text}</p>
                         
@@ -473,7 +496,19 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
                               <span className="text-xs font-medium text-gray-600">Panel Evaluation:</span>
                               {renderAgentIndicators(validation)}
                               <span className="text-xs text-gray-500">
-                                ({validation.consensus.verdict_counts.VALID}V / {validation.consensus.verdict_counts.UNCERTAIN}U / {validation.consensus.verdict_counts.INVALID}I)
+                                {(() => {
+                                  const isNewFormat = isNewFormatCitationValidation(validation)
+                                  if (isNewFormat && validation.consensus.scores) {
+                                    const highScores = validation.consensus.scores.filter(s => s >= 8).length
+                                    const mediumScores = validation.consensus.scores.filter(s => s >= 5 && s < 8).length
+                                    const lowScores = validation.consensus.scores.filter(s => s < 5).length
+                                    return `(Avg: ${validation.consensus.average_score?.toFixed(1) || 'N/A'}, σ: ${validation.consensus.standard_deviation?.toFixed(1) || 'N/A'})`
+                                  } else if (validation.consensus.verdict_counts) {
+                                    return `(${validation.consensus.verdict_counts.VALID}V / ${validation.consensus.verdict_counts.UNCERTAIN}U / ${validation.consensus.verdict_counts.INVALID}I)`
+                                  } else {
+                                    return '(N/A)'
+                                  }
+                                })()}
                               </span>
                             </div>
                             <div className="flex items-center gap-3">

@@ -26,36 +26,62 @@ export type Tier3Verdict =
 export type Tier3Confidence = "high" | "medium" | "low";
 
 // Tier 3 Panel Types (new 3-call panel system)
-export type Tier3AgentVerdictType = "VALID" | "INVALID" | "UNCERTAIN";
+export type Tier3AgentVerdictType = "VALID" | "INVALID" | "UNCERTAIN"; // Legacy - kept for backward compatibility
 
-export type Tier3FinalStatus = "VALID" | "WARN" | "FAIL";
+export type Tier3FinalStatus = "VALID" | "WARN" | "FAIL"; // Legacy - kept for backward compatibility
+
+// New Tier 3 Risk-Based Evaluation
+export type Tier3RiskLevel = "LOW_RISK" | "MODERATE_RISK" | "NEEDS_ADDITIONAL_REVIEW";
 
 export type Tier3AgreementLevel = "unanimous" | "majority" | "split";
 
 export interface Tier3AgentVerdict {
   agent: string; // e.g., "tier3_agent_1", "tier3_agent_2", "tier3_agent_3"
-  verdict: Tier3AgentVerdictType;
+  // New format: risk-based evaluation
+  risk_level?: Tier3RiskLevel;
   reasoning?: string; // Optional reasoning from the agent
-  invalid_reason?: string; // Reason code if verdict is INVALID
-  uncertain_reason?: string; // Reason code if verdict is UNCERTAIN
+  // Legacy format: kept for backward compatibility
+  verdict?: Tier3AgentVerdictType;
+  invalid_reason?: string; // Reason code if verdict is INVALID (legacy)
+  uncertain_reason?: string; // Reason code if verdict is UNCERTAIN (legacy)
   timestamp: string; // ISO 8601 timestamp
   model: string; // e.g., "claude-sonnet-4-5-20250929"
+  token_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    provider: 'anthropic' | 'openai' | 'gemini';
+  };
+  cost?: {
+    input_cost: number;
+    output_cost: number;
+    total_cost: number;
+    currency: string;
+  };
 }
 
 export interface Tier3Consensus {
   agreement_level: Tier3AgreementLevel;
-  verdict_counts: {
+  // New format: risk-based evaluation
+  risk_level_counts?: {
+    LOW_RISK: number;
+    MODERATE_RISK: number;
+    NEEDS_ADDITIONAL_REVIEW: number;
+  };
+  final_risk_level?: Tier3RiskLevel;
+  // Legacy format: kept for backward compatibility
+  verdict_counts?: {
     VALID: number;
     INVALID: number;
     UNCERTAIN: number;
   };
-  final_status: Tier3FinalStatus; // VALID (3/3), WARN (2/3), or FAIL (<2/3)
+  final_status?: Tier3FinalStatus; // VALID (3/3), WARN (2/3), or FAIL (<2/3) (legacy)
   confidence_score: number; // 0.0-1.0
   reasoning: string;
 }
 
 // Tier 2 Validation Types (per validationT2.md)
-export type ValidationVerdict = "VALID" | "INVALID" | "UNCERTAIN";
+export type ValidationVerdict = "VALID" | "INVALID" | "UNCERTAIN"; // Legacy - kept for backward compatibility
 
 export type AgreementLevel = "unanimous" | "strong" | "split";
 
@@ -66,16 +92,38 @@ export type CitationRecommendationType =
 
 export interface AgentVerdict {
   agent: string; // e.g., "citation_authority_validator_v1"
-  verdict: ValidationVerdict;
-  invalid_reason?: string; // Reason code if verdict is INVALID
-  uncertain_reason?: string; // Reason code if verdict is UNCERTAIN
+  // New format: numeric scoring (1-10, higher = more certain citation is real)
+  score?: number; // 1-10
+  reasoning?: string; // Optional explanation
+  // Legacy format: kept for backward compatibility
+  verdict?: ValidationVerdict;
+  invalid_reason?: string; // Reason code if verdict is INVALID (legacy)
+  uncertain_reason?: string; // Reason code if verdict is UNCERTAIN (legacy)
   timestamp: string; // ISO 8601 timestamp
   model: string; // e.g., "claude-haiku-4-5-20251001"
+  token_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    provider: 'anthropic' | 'openai' | 'gemini';
+  };
+  cost?: {
+    input_cost: number;
+    output_cost: number;
+    total_cost: number;
+    currency: string;
+  };
 }
 
 export interface Consensus {
   agreement_level: AgreementLevel;
-  verdict_counts: {
+  // New format: numeric scoring statistics
+  scores?: number[]; // Array of 5 scores from agents
+  average_score?: number; // Mean of scores
+  variance?: number; // Variance of scores
+  standard_deviation?: number; // Standard deviation for easier interpretation
+  // Legacy format: kept for backward compatibility
+  verdict_counts?: {
     VALID: number;
     INVALID: number;
     UNCERTAIN: number;
@@ -89,6 +137,20 @@ export interface Consensus {
 export interface CitationValidation {
   panel_evaluation: AgentVerdict[];
   consensus: Consensus;
+  run_cost?: {
+    byModel: Record<string, {
+      input_cost: number;
+      output_cost: number;
+      total_cost: number;
+      currency: string;
+    }>;
+    total: {
+      input_cost: number;
+      output_cost: number;
+      total_cost: number;
+      currency: string;
+    };
+  };
 }
 
 export interface CitationMetadata {
@@ -97,6 +159,9 @@ export interface CitationMetadata {
   documentType?: string; // motion, brief, memo, etc.
   totalCitations: number;
   identificationMethod?: 'custom' | 'eyecite'; // Method used to identify citations
+  testRunId?: string;        // UUID to group test runs together
+  testRunNumber?: number;    // Which run in the test (1, 2, 3...)
+  testRunTotal?: number;     // Total runs in this test
 }
 
 export interface ContentParagraph {
@@ -172,6 +237,20 @@ export interface Tier3Result {
   
   timestamp: string; // ISO 8601 timestamp
   model: string; // e.g., "claude-sonnet-4-5-20250929"
+  run_cost?: {
+    byModel: Record<string, {
+      input_cost: number;
+      output_cost: number;
+      total_cost: number;
+      currency: string;
+    }>;
+    total: {
+      input_cost: number;
+      output_cost: number;
+      total_cost: number;
+      currency: string;
+    };
+  };
 }
 
 export interface CitationRecommendation {
@@ -261,5 +340,49 @@ export interface AnalysisStatistics {
     tier3Validated: number;
     tier2ValidVoteDistribution: Record<0 | 1 | 2 | 3 | 4 | 5, number>;
   };
+}
+
+// Format detection helpers
+/**
+ * Check if an AgentVerdict uses the new format (numeric scoring)
+ */
+export function isNewFormatAgentVerdict(verdict: any): boolean {
+  return typeof verdict === 'object' && 
+         verdict !== null && 
+         typeof verdict.score === 'number' &&
+         verdict.score >= 1 && 
+         verdict.score <= 10;
+}
+
+/**
+ * Check if a Tier3AgentVerdict uses the new format (risk-based)
+ */
+export function isNewFormatTier3Verdict(verdict: any): boolean {
+  return typeof verdict === 'object' && 
+         verdict !== null && 
+         typeof verdict.risk_level === 'string' &&
+         ['LOW_RISK', 'MODERATE_RISK', 'NEEDS_ADDITIONAL_REVIEW'].includes(verdict.risk_level);
+}
+
+/**
+ * Check if a CitationValidation uses the new format
+ */
+export function isNewFormatCitationValidation(validation: any): boolean {
+  if (!validation || !validation.panel_evaluation || !Array.isArray(validation.panel_evaluation)) {
+    return false;
+  }
+  // Check if all agents use new format
+  return validation.panel_evaluation.every((agent: any) => isNewFormatAgentVerdict(agent));
+}
+
+/**
+ * Check if a Tier3Result uses the new format
+ */
+export function isNewFormatTier3Result(tier3: any): boolean {
+  if (!tier3 || !tier3.panel_evaluation || !Array.isArray(tier3.panel_evaluation)) {
+    return false;
+  }
+  // Check if all agents use new format
+  return tier3.panel_evaluation.every((agent: any) => isNewFormatTier3Verdict(agent));
 }
 

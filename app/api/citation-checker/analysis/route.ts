@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { CitationDocument, Citation, CitationValidation, AnalysisStatistics, Tier3Verdict, Tier3FinalStatus, ValidationVerdict, AgreementLevel } from "@/types/citation-json"
+import { CitationDocument, Citation, CitationValidation, AnalysisStatistics, Tier3Verdict, Tier3FinalStatus, ValidationVerdict, AgreementLevel, Tier3RiskLevel } from "@/types/citation-json"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
+import { isNewFormatCitationValidation, isNewFormatTier3Result } from "@/lib/citation-identification/format-helpers"
 
 export async function GET(request: NextRequest) {
   try {
@@ -203,9 +204,12 @@ export async function GET(request: NextRequest) {
               }
             }
 
-            // Count Tier 2 citations with 5/5 VALID votes in completed documents
+            // Count Tier 2 citations with 5/5 VALID votes in completed documents (legacy format only)
             // Only count if citation actually has Tier 2 validation data
             if (hasTier2 && citation.validation && citation.validation.panel_evaluation) {
+              const isNewFormat = isNewFormatCitationValidation(citation.validation)
+              if (!isNewFormat) {
+                // Legacy format: count VALID votes
               const validCount = citation.validation.panel_evaluation.filter(e => e.verdict === 'VALID').length
               // Track distribution temporarily (only add if document completes)
               if (citation.validation.panel_evaluation.length === 5 && validCount >= 0 && validCount <= 5) {
@@ -214,6 +218,19 @@ export async function GET(request: NextRequest) {
               // Only count if exactly 5 agents voted VALID
               if (validCount === 5 && citation.validation.panel_evaluation.length === 5) {
                 documentTier2Unanimous5of5Count++
+                }
+              } else {
+                // New format: count high scores (8-10) as "unanimous"
+                const highScoreCount = citation.validation.panel_evaluation.filter(e => 
+                  typeof e.score === 'number' && e.score >= 8
+                ).length
+                if (highScoreCount === 5) {
+                  documentTier2Unanimous5of5Count++
+                }
+                // Track score distribution (map scores to 0-5 buckets for compatibility)
+                const avgScore = citation.validation.consensus?.average_score || 0
+                const scoreBucket = Math.floor((avgScore / 10) * 5) as 0 | 1 | 2 | 3 | 4 | 5
+                documentDistribution[scoreBucket]++
               }
             }
           }
@@ -257,21 +274,35 @@ export async function GET(request: NextRequest) {
           // Process Tier 2 validation data
           if (hasTier2 && citation.validation) {
             const validation = citation.validation as CitationValidation
+            const isNewFormat = isNewFormatCitationValidation(validation)
             
-            // Count votes
-            const validCount = validation.panel_evaluation?.filter(e => e.verdict === 'VALID').length || 0
-            const invalidCount = validation.panel_evaluation?.filter(e => e.verdict === 'INVALID').length || 0
-            const uncertainCount = validation.panel_evaluation?.filter(e => e.verdict === 'UNCERTAIN').length || 0
+            // Only process new format citations in aggregate statistics
+            if (!isNewFormat) {
+              // Skip legacy format citations in aggregate stats
+              continue
+            }
+            
+            // New format: use scores instead of verdicts
+            const scores = validation.panel_evaluation
+              .map(e => e.score)
+              .filter((score): score is number => typeof score === 'number' && score >= 1 && score <= 10)
+            
+            if (scores.length === 5) {
+              // Count high scores (8-10) as "valid", medium (5-7) as "uncertain", low (1-4) as "invalid"
+              const highScoreCount = scores.filter(s => s >= 8).length
+              const mediumScoreCount = scores.filter(s => s >= 5 && s < 8).length
+              const lowScoreCount = scores.filter(s => s < 5).length
 
-            // Update vote distributions
-            if (validCount >= 0 && validCount <= 5) {
-              stats.tier2Voting.validVotes[validCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              // Update vote distributions (mapped from scores)
+              if (highScoreCount >= 0 && highScoreCount <= 5) {
+                stats.tier2Voting.validVotes[highScoreCount as 0 | 1 | 2 | 3 | 4 | 5]++
             }
-            if (invalidCount >= 0 && invalidCount <= 5) {
-              stats.tier2Voting.invalidVotes[invalidCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              if (lowScoreCount >= 0 && lowScoreCount <= 5) {
+                stats.tier2Voting.invalidVotes[lowScoreCount as 0 | 1 | 2 | 3 | 4 | 5]++
             }
-            if (uncertainCount >= 0 && uncertainCount <= 5) {
-              stats.tier2Voting.uncertainVotes[uncertainCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              if (mediumScoreCount >= 0 && mediumScoreCount <= 5) {
+                stats.tier2Voting.uncertainVotes[mediumScoreCount as 0 | 1 | 2 | 3 | 4 | 5]++
+              }
             }
 
             // Track agreement levels
@@ -279,9 +310,12 @@ export async function GET(request: NextRequest) {
               const agreementLevel = validation.consensus.agreement_level
               if (agreementLevel === 'unanimous') {
                 stats.tier2Voting.agreementLevels.unanimous++
-                // Check if it's unanimous VALID (5/5)
-                if (validCount === 5) {
+                // Check if it's unanimous high scores (5/5 scores >= 8)
+                if (isNewFormat && scores.length === 5) {
+                  const highScoreCount = scores.filter(s => s >= 8).length
+                  if (highScoreCount === 5) {
                   stats.efficiency.unanimousDecisions++
+                  }
                 }
               } else if (agreementLevel === 'strong') {
                 stats.tier2Voting.agreementLevels.strong++
@@ -301,11 +335,24 @@ export async function GET(request: NextRequest) {
               }
             }
 
-            // Track agent-specific statistics
+            // Track agent-specific statistics (new format uses scores)
             if (validation.panel_evaluation) {
               for (const eval_ of validation.panel_evaluation) {
                 const agentName = eval_.agent
-                if (stats.agentAgreement.agentStats[agentName]) {
+                if (!stats.agentAgreement.agentStats[agentName]) {
+                  stats.agentAgreement.agentStats[agentName] = { valid: 0, invalid: 0, uncertain: 0 }
+                }
+                if (isNewFormat && typeof eval_.score === 'number') {
+                  // Map scores to verdict categories for compatibility
+                  if (eval_.score >= 8) {
+                    stats.agentAgreement.agentStats[agentName].valid++
+                  } else if (eval_.score >= 5) {
+                    stats.agentAgreement.agentStats[agentName].uncertain++
+                  } else {
+                    stats.agentAgreement.agentStats[agentName].invalid++
+                  }
+                } else if (!isNewFormat && eval_.verdict) {
+                  // Legacy format
                   if (eval_.verdict === 'VALID') {
                     stats.agentAgreement.agentStats[agentName].valid++
                   } else if (eval_.verdict === 'INVALID') {
@@ -321,36 +368,86 @@ export async function GET(request: NextRequest) {
                 for (let j = i + 1; j < validation.panel_evaluation.length; j++) {
                   const agent1 = validation.panel_evaluation[i].agent
                   const agent2 = validation.panel_evaluation[j].agent
-                  if (validation.panel_evaluation[i].verdict === validation.panel_evaluation[j].verdict) {
+                  
+                  // Initialize matrices if needed
+                  if (!stats.agentAgreement.pairwiseMatrix[agent1]) {
+                    stats.agentAgreement.pairwiseMatrix[agent1] = {}
+                  }
+                  if (!stats.agentAgreement.pairwiseMatrix[agent2]) {
+                    stats.agentAgreement.pairwiseMatrix[agent2] = {}
+                  }
+                  
+                  let agree = false
+                  if (isNewFormat) {
+                    // Compare scores (within 2 points = agreement)
+                    const score1 = validation.panel_evaluation[i].score
+                    const score2 = validation.panel_evaluation[j].score
+                    if (typeof score1 === 'number' && typeof score2 === 'number') {
+                      agree = Math.abs(score1 - score2) <= 2
+                    }
+                  } else {
+                    // Compare verdicts
+                    agree = validation.panel_evaluation[i].verdict === validation.panel_evaluation[j].verdict
+                  }
+                  
+                  if (agree) {
                     // Update both directions for symmetric matrix
-                    if (stats.agentAgreement.pairwiseMatrix[agent1] && stats.agentAgreement.pairwiseMatrix[agent1][agent2] !== undefined) {
-                      stats.agentAgreement.pairwiseMatrix[agent1][agent2]++
-                    }
-                    if (stats.agentAgreement.pairwiseMatrix[agent2] && stats.agentAgreement.pairwiseMatrix[agent2][agent1] !== undefined) {
-                      stats.agentAgreement.pairwiseMatrix[agent2][agent1]++
-                    }
+                    stats.agentAgreement.pairwiseMatrix[agent1][agent2] = (stats.agentAgreement.pairwiseMatrix[agent1][agent2] || 0) + 1
+                    stats.agentAgreement.pairwiseMatrix[agent2][agent1] = (stats.agentAgreement.pairwiseMatrix[agent2][agent1] || 0) + 1
                   }
                 }
               }
             }
           }
 
-          // Process Tier 3 data
+          // Process Tier 3 data (only new format)
           if (hasTier3 && citation.tier_3) {
+            const isNewFormatT3 = isNewFormatTier3Result(citation.tier_3)
+            
+            // Only process new format Tier 3 results in aggregate statistics
+            if (!isNewFormatT3) {
+              continue
+            }
+            
             stats.tier3Validation.analyzed++
             
-            // Check if this Tier 3 citation had unanimous 5/5 VALID votes in Tier 2
+            // Check if this Tier 3 citation had unanimous high scores (5/5 scores >= 8) in Tier 2
             if (hasTier2 && citation.validation) {
-              const validCount = citation.validation.panel_evaluation?.filter(e => e.verdict === 'VALID').length || 0
-              if (validCount === 5) {
+              const isNewFormatT2 = isNewFormatCitationValidation(citation.validation)
+              if (isNewFormatT2 && citation.validation.panel_evaluation) {
+                const highScoreCount = citation.validation.panel_evaluation.filter(e => 
+                  typeof e.score === 'number' && e.score >= 8
+                ).length
+                if (highScoreCount === 5) {
                 stats.tier3Validation.tier3WithUnanimousTier2++
+              }
               }
             }
             
-            // Track Tier 3 verdicts (new format)
-            const tier3Status = getTier3FinalStatus(citation.tier_3)
-            if (tier3Status && stats.tier3Validation.verdicts[tier3Status] !== undefined) {
-              stats.tier3Validation.verdicts[tier3Status]++
+            // Track Tier 3 risk levels (new format) or verdicts (legacy)
+            const tier3Consensus = citation.tier_3.consensus
+            if (tier3Consensus) {
+              // New format: use risk levels
+              if (tier3Consensus.final_risk_level) {
+                // Map risk levels to verdict categories for compatibility
+                if (tier3Consensus.final_risk_level === 'LOW_RISK') {
+                  stats.tier3Validation.verdicts.VALID++
+                } else if (tier3Consensus.final_risk_level === 'MODERATE_RISK') {
+                  stats.tier3Validation.verdicts.WARN++
+                } else if (tier3Consensus.final_risk_level === 'NEEDS_ADDITIONAL_REVIEW') {
+                  stats.tier3Validation.verdicts.FAIL++
+                }
+              } else if (tier3Consensus.final_status) {
+                // Legacy format: use final_status
+                const finalStatus = tier3Consensus.final_status
+                if (finalStatus === 'VALID') {
+                  stats.tier3Validation.verdicts.VALID++
+                } else if (finalStatus === 'WARN') {
+                  stats.tier3Validation.verdicts.WARN++
+                } else if (finalStatus === 'FAIL') {
+                  stats.tier3Validation.verdicts.FAIL++
+                }
+              }
             }
             
             // Track legacy verdicts for backward compatibility

@@ -8,8 +8,10 @@ import { StepProgress } from "../../components/StepProgress"
 
 export default async function CitationsReportPageRoute({
   params,
+  searchParams,
 }: {
   params: { fileId: string }
+  searchParams: { checkId?: string }
 }) {
   const session = await getServerSession(authOptions)
 
@@ -46,7 +48,7 @@ export default async function CitationsReportPageRoute({
                 View the final citation validation report
               </p>
             </div>
-            <CitationsReportPage fileId={params.fileId} />
+            <CitationsReportPage fileId={params.fileId} checkId={searchParams.checkId} />
           </div>
         </div>
       </main>

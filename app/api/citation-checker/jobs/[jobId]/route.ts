@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-identification/queue"
 
 export async function GET(
   request: NextRequest,
@@ -50,6 +51,57 @@ export async function GET(
 
     const tier2Items = job.queueItems.filter(item => item.tier === 'tier2')
     const tier3Items = job.queueItems.filter(item => item.tier === 'tier3')
+
+    // Check for unvalidated citations and retry them if job appears complete
+    if (job.status === 'completed' || (tier2Items.filter(i => i.status === 'pending' || i.status === 'processing').length === 0)) {
+      const retriedCount = await retryUnvalidatedCitations(job.id)
+      if (retriedCount > 0) {
+        // Re-check job completion after retries
+        await checkJobCompletion(job.id)
+        // Re-fetch job to get updated status
+        const updatedJob = await prisma.validationJob.findUnique({
+          where: { id: params.jobId },
+          include: {
+            queueItems: {
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+        })
+        if (updatedJob) {
+          const updatedTier2Items = updatedJob.queueItems.filter(item => item.tier === 'tier2')
+          const updatedTier3Items = updatedJob.queueItems.filter(item => item.tier === 'tier3')
+          return NextResponse.json({
+            id: updatedJob.id,
+            status: updatedJob.status,
+            tier2Progress: {
+              current: updatedJob.tier2Completed,
+              total: updatedJob.tier2Total,
+              percentage: updatedJob.tier2Total > 0 
+                ? Math.round((updatedJob.tier2Completed / updatedJob.tier2Total) * 100) 
+                : 0,
+              pending: updatedTier2Items.filter(i => i.status === 'pending').length,
+              processing: updatedTier2Items.filter(i => i.status === 'processing').length,
+              completed: updatedTier2Items.filter(i => i.status === 'completed').length,
+              failed: updatedTier2Items.filter(i => i.status === 'failed').length,
+            },
+            tier3Progress: {
+              current: updatedJob.tier3Completed,
+              total: updatedJob.tier3Total,
+              percentage: updatedJob.tier3Total > 0 
+                ? Math.round((updatedJob.tier3Completed / updatedJob.tier3Total) * 100) 
+                : 0,
+              pending: updatedTier3Items.filter(i => i.status === 'pending').length,
+              processing: updatedTier3Items.filter(i => i.status === 'processing').length,
+              completed: updatedTier3Items.filter(i => i.status === 'completed').length,
+              failed: updatedTier3Items.filter(i => i.status === 'failed').length,
+            },
+            error: updatedJob.error,
+            checkId: updatedJob.checkId,
+            retriedCitations: retriedCount,
+          })
+        }
+      }
+    }
 
     return NextResponse.json({
       id: job.id,

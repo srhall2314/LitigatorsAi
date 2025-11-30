@@ -21,7 +21,6 @@ export function getCitationAuthorityValidatorPrompt(
     const caseComponents = components as CaseComponents
     componentsText = `- Court: ${caseComponents.court || 'N/A'}
 - Reporter: ${caseComponents.reporter || 'N/A'}
-- Volume: ${caseComponents.reporter || 'N/A'} (reporter abbreviation)
 - Page: ${caseComponents.page || 'N/A'}
 - Year: ${caseComponents.year || 'N/A'}`
   } else if (citation.citationType === 'statute') {
@@ -57,26 +56,19 @@ Evaluate STRICTLY:
 - Is the page number within normal range?
 - Did this court exist during that time?
 
-If metadata is normal → VALID.
-Only clear structural impossibilities → INVALID.
-Anything unusual but not impossible → UNCERTAIN.
+Provide a confidence score from 1-10 where:
+- 10 = Completely certain the citation is real (all metadata checks pass perfectly)
+- 8-9 = Very confident the citation is real (minor uncertainties)
+- 6-7 = Moderately confident (some unusual aspects but likely real)
+- 4-5 = Uncertain (significant concerns but not clearly impossible)
+- 2-3 = Low confidence (clear problems but not definitively impossible)
+- 1 = Very low confidence (major structural impossibilities)
+
+Focus on objective, structural factors. Higher scores indicate higher certainty that the citation is real.
 
 Respond EXACTLY with:
-VALID
-INVALID [reason_code]
-UNCERTAIN [reason_code]
-
-INVALID reason codes:
-- reporter_court_mismatch
-- volume_impossible
-- page_unreasonable
-- reporter_timing_wrong
-- year_implausible
-
-UNCERTAIN reason codes:
-- unusual_volume_page
-- reporter_edge_case
-- timing_questionable`
+SCORE: [1-10]
+REASONING: [brief explanation of your score]`
 }
 
 /**
@@ -118,25 +110,19 @@ Evaluate ONLY:
 - Does the case type (civil/criminal/admin) match the party roles?
 - Are there entity-type mismatches (e.g., federal agency litigating a local eviction case)?
 
-If party configuration is normal → VALID.
-Generic names → VALID or UNCERTAIN (never INVALID).
-INVALID only for clear mismatches.
+Provide a confidence score from 1-10 where:
+- 10 = Completely certain the citation is real (party configuration is perfectly normal)
+- 8-9 = Very confident the citation is real (minor uncertainties)
+- 6-7 = Moderately confident (some unusual aspects but likely real)
+- 4-5 = Uncertain (significant concerns but not clearly impossible)
+- 2-3 = Low confidence (clear problems but not definitively impossible)
+- 1 = Very low confidence (major party/entity mismatches)
+
+Generic names are common and should not lower the score. Higher scores indicate higher certainty that the citation is real.
 
 Respond EXACTLY with:
-VALID
-INVALID [reason_code]
-UNCERTAIN [reason_code]
-
-INVALID reason codes:
-- case_type_implausible
-- characteristics_mismatch
-- party_role_impossible
-- entity_type_impossible
-
-UNCERTAIN reason codes:
-- names_generic_but_possible
-- unusual_pairing
-- characteristics_unclear`
+SCORE: [1-10]
+REASONING: [brief explanation of your score]`
 }
 
 /**
@@ -180,25 +166,19 @@ Evaluate:
 - Was the legal issue relevant during that period?
 - Is the age of the authority plausible for its cited use?
 
-If historically normal → VALID.
-INVALID only for clear anachronisms.
-Ambiguous timeline → UNCERTAIN.
+Provide a confidence score from 1-10 where:
+- 10 = Completely certain the citation is real (all temporal checks pass perfectly)
+- 8-9 = Very confident the citation is real (minor uncertainties)
+- 6-7 = Moderately confident (some unusual aspects but likely real)
+- 4-5 = Uncertain (significant concerns but not clearly impossible)
+- 2-3 = Low confidence (clear problems but not definitively impossible)
+- 1 = Very low confidence (major temporal impossibilities, anachronisms)
+
+Focus on objective, historical factors. Higher scores indicate higher certainty that the citation is real.
 
 Respond EXACTLY with:
-VALID
-INVALID [reason_code]
-UNCERTAIN [reason_code]
-
-INVALID reason codes:
-- temporal_impossibility
-- anachronistic_issue
-- historical_mismatch
-- future_dated
-
-UNCERTAIN reason codes:
-- early_in_reporter_series
-- edge_of_legal_development
-- timing_unusual_but_possible`
+SCORE: [1-10]
+REASONING: [brief explanation of your score]`
 }
 
 /**
@@ -228,25 +208,19 @@ Evaluate ONLY:
 - Is this court an appropriate forum for this subject matter?
 - Does the general legal rule described plausibly match the authority category?
 
-If broadly consistent → VALID.
-If clearly doctrinally impossible → INVALID.
-If unfamiliar or unclear → UNCERTAIN (preferred).
+Provide a confidence score from 1-10 where:
+- 10 = Completely certain the citation is real (doctrinally consistent and appropriate)
+- 8-9 = Very confident the citation is real (minor uncertainties)
+- 6-7 = Moderately confident (some unusual aspects but likely real)
+- 4-5 = Uncertain (significant concerns but not clearly impossible)
+- 2-3 = Low confidence (clear problems but not definitively impossible)
+- 1 = Very low confidence (major doctrinal impossibilities)
+
+Unfamiliarity alone should not lower the score significantly. Higher scores indicate higher certainty that the citation is real.
 
 Respond EXACTLY with:
-VALID
-INVALID [reason_code]
-UNCERTAIN [reason_code]
-
-INVALID reason codes:
-- inconsistent_with_knowledge
-- unknown_authority
-- doctrine_impossible
-- jurisdiction_mismatch
-
-UNCERTAIN reason codes:
-- unfamiliar_but_possible
-- edge_case_authority
-- weak_signals_both_ways`
+SCORE: [1-10]
+REASONING: [brief explanation of your score]`
 }
 
 /**
@@ -277,24 +251,18 @@ Evaluate ONLY:
 - Are there combinations that cannot coexist (e.g., criminal statute cited as civil precedent)?
 - Is the formatting structurally incoherent in a way no specialist would handle?
 
-If no contradictions → VALID.
-If contradictions are clear → INVALID.
-If merely unusual → UNCERTAIN.
+Provide a confidence score from 1-10 where:
+- 10 = Completely certain the citation is real (no contradictions detected)
+- 8-9 = Very confident the citation is real (minor uncertainties)
+- 6-7 = Moderately confident (some unusual aspects but likely real)
+- 4-5 = Uncertain (significant concerns but not clearly impossible)
+- 2-3 = Low confidence (clear problems but not definitively impossible)
+- 1 = Very low confidence (major cross-dimensional contradictions)
+
+Focus on objective contradictions. Higher scores indicate higher certainty that the citation is real.
 
 Respond EXACTLY with:
-VALID
-INVALID [reason_code]
-UNCERTAIN [reason_code]
-
-INVALID reason codes:
-- cross_dimension_contradiction
-- structural_incoherence
-- authority_category_mismatch
-- impossible_combination
-
-UNCERTAIN reason codes:
-- mixed_signals
-- insufficient_evidence
-- unusual_but_not_invalid`
+SCORE: [1-10]
+REASONING: [brief explanation of your score]`
 }
 
