@@ -662,11 +662,12 @@ export async function checkJobCompletion(jobId: string): Promise<boolean> {
         
         // DON'T mark as complete - return false to allow more retries
         // Only mark as complete if we've exhausted all retry attempts
-        const maxRetriesReached = refreshedQueueItems.every(item => 
-          item.status === 'failed' ? item.retryCount >= 3 : true
+        // Check if there are any failed items that haven't reached max retries
+        const hasRetriesAvailable = refreshedQueueItems.some(item => 
+          item.status === 'failed' && item.retryCount < 3
         )
         
-        if (!maxRetriesReached) {
+        if (hasRetriesAvailable) {
           return false // Still have retries available
         }
         
