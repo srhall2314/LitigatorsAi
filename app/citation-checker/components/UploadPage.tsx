@@ -194,6 +194,14 @@ export function UploadPage() {
                           Run Test
                         </button>
                       )}
+                      {hasJson && (
+                        <button
+                          onClick={() => router.push(`/citation-checker/${file.id}/heavy-analysis`)}
+                          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+                        >
+                          Heavy Analysis
+                        </button>
+                      )}
                       {hasJson ? (
                         <button
                           onClick={() => handleFileSelect(file.id, latestCheck!.id)}

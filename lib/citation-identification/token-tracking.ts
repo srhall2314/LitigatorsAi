@@ -3,7 +3,7 @@
  * Designed to support multiple providers/models (currently Anthropic, extensible for OpenAI, Gemini)
  */
 
-export type Provider = 'anthropic' | 'openai' | 'gemini'
+export type Provider = 'anthropic' | 'openai' | 'gemini' | 'grok'
 
 export interface TokenUsage {
   input_tokens: number

@@ -793,6 +793,12 @@ export function TestRunResultsPage({ fileId, testRunId }: TestRunResultsPageProp
         >
           Run Another Test
         </button>
+        <button
+          onClick={() => window.open(`/api/citation-checker/files/${fileId}/heavy-analysis/compare?testRunId=${testRunId}`, '_blank')}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+        >
+          Compare Heavy Analysis
+        </button>
       </div>
     </div>
   )

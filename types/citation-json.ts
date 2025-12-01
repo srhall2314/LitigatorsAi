@@ -50,7 +50,7 @@ export interface Tier3AgentVerdict {
     input_tokens: number;
     output_tokens: number;
     total_tokens: number;
-    provider: 'anthropic' | 'openai' | 'gemini';
+    provider: 'anthropic' | 'openai' | 'gemini' | 'grok';
   };
   cost?: {
     input_cost: number;
@@ -105,7 +105,7 @@ export interface AgentVerdict {
     input_tokens: number;
     output_tokens: number;
     total_tokens: number;
-    provider: 'anthropic' | 'openai' | 'gemini';
+    provider: 'anthropic' | 'openai' | 'gemini' | 'grok';
   };
   cost?: {
     input_cost: number;
@@ -162,6 +162,9 @@ export interface CitationMetadata {
   testRunId?: string;        // UUID to group test runs together
   testRunNumber?: number;    // Which run in the test (1, 2, 3...)
   testRunTotal?: number;     // Total runs in this test
+  heavyAnalysisRunId?: string;        // UUID to group heavy analysis runs together
+  heavyAnalysisRunNumber?: number;    // Which run in the heavy analysis test (1, 2, 3...)
+  heavyAnalysisRunTotal?: number;     // Total runs in this heavy analysis test
 }
 
 export interface ContentParagraph {
@@ -258,6 +261,30 @@ export interface CitationRecommendation {
   reason: string;
 }
 
+// Heavy Model Analysis Types
+export type HeavyAnalysisRiskLevel = "Low Risk" | "Medium Risk" | "human review";
+
+export interface HeavyAnalysisResult {
+  riskLevel: HeavyAnalysisRiskLevel;
+  caseFit: string; // How citation fits the overall case
+  caseLink?: string; // Link to verify the case
+  analysis?: string; // Optional detailed analysis
+  timestamp: string;
+  model: string;
+  token_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    provider: 'anthropic' | 'openai' | 'gemini' | 'grok';
+  };
+  cost?: {
+    input_cost: number;
+    output_cost: number;
+    total_cost: number;
+    currency: string;
+  };
+}
+
 export interface Citation {
   id: string; // cit_001, cit_002, etc.
   citationText: string; // Exact citation as it appears in document
@@ -268,6 +295,7 @@ export interface Citation {
   tier_3: Tier3Result | null; // null if not escalated
   recommendations: CitationRecommendation[] | null; // null until Phase 2
   validation?: CitationValidation; // Tier 2 validation results (per validationT2.md)
+  heavy_analysis?: HeavyAnalysisResult; // Heavy model full-document analysis
 }
 
 export interface CitationDocument {
