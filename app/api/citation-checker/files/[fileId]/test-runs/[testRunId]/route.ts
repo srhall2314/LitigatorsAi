@@ -7,9 +7,10 @@ import { getCitationRiskLevel } from "@/lib/citation-identification/format-helpe
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { fileId: string; testRunId: string } }
+  { params }: { params: Promise<{ fileId: string; testRunId: string }> }
 ) {
   try {
+    const { fileId, testRunId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -27,7 +28,7 @@ export async function GET(
     // Get all citation checks for this file
     // Use findMany with full jsonData to ensure we get the latest updates
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "asc" },
       select: {
         id: true,
@@ -46,7 +47,7 @@ export async function GET(
     const testRunChecks = checks.filter(check => {
       const jsonData = check.jsonData as any
       const metadata = jsonData?.document?.metadata
-      const matches = metadata?.testRunId === params.testRunId
+      const matches = metadata?.testRunId === testRunId
       if (matches) {
         console.log(`[test-runs] Found test run check: ${check.id}, version: ${check.version}, testRunNumber: ${metadata?.testRunNumber}`)
         const citations = jsonData?.document?.citations || []
@@ -384,7 +385,7 @@ export async function GET(
     const sourceCheckId = sourceCheck?.id || null
 
     return NextResponse.json({
-      testRunId: params.testRunId,
+      testRunId,
       testRunTotal,
       runsCompleted: runs.length,
       runs,

@@ -6,9 +6,10 @@ import { retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-id
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { jobId: string } }
+  { params }: { params: Promise<{ jobId: string }> }
 ) {
   try {
+    const { jobId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -24,7 +25,7 @@ export async function GET(
     }
 
     const job = await prisma.validationJob.findUnique({
-      where: { id: params.jobId },
+      where: { id: jobId },
       include: {
         queueItems: {
           orderBy: { createdAt: 'asc' },
@@ -60,7 +61,7 @@ export async function GET(
         await checkJobCompletion(job.id)
         // Re-fetch job to get updated status
         const updatedJob = await prisma.validationJob.findUnique({
-          where: { id: params.jobId },
+          where: { id: jobId },
           include: {
             queueItems: {
               orderBy: { createdAt: 'asc' },

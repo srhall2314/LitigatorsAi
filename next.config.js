@@ -14,6 +14,8 @@ const nextConfig = {
   },
   // Ensure these packages are properly bundled
   transpilePackages: [],
+  // Turbopack config (Next.js 16 uses Turbopack by default)
+  turbopack: {},
 }
 
 module.exports = nextConfig

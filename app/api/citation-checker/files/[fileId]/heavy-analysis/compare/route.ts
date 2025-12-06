@@ -7,9 +7,10 @@ import { CitationDocument } from "@/types/citation-json"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
+    const { fileId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -28,7 +29,7 @@ export async function GET(
 
     // Get all checks for this file
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "asc" },
       select: {
         id: true,

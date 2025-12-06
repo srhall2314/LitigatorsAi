@@ -6,9 +6,10 @@ import { deleteBlob } from "@/lib/blob"
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
+    const { fileId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -25,7 +26,7 @@ export async function DELETE(
 
     // Get the file upload record
     const fileUpload = await prisma.fileUpload.findUnique({
-      where: { id: params.fileId },
+      where: { id: fileId },
       include: {
         citationChecks: true,
       },
@@ -52,7 +53,7 @@ export async function DELETE(
 
     // Delete the file upload record (this will cascade delete CitationCheck records)
     await prisma.fileUpload.delete({
-      where: { id: params.fileId },
+      where: { id: fileId },
     })
 
     return NextResponse.json({ 

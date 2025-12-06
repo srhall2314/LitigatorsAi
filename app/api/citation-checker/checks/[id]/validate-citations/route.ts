@@ -8,20 +8,12 @@ import { CitationDocument } from "@/types/citation-json"
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  console.log(`[validate-citations] POST request received for checkId: ${params?.id}`)
   try {
-    // Validate params
-    if (!params || !params.id) {
-      console.error("[validate-citations] Missing params.id:", params)
-      return NextResponse.json(
-        { error: "Missing check ID in request" },
-        { status: 400 }
-      )
-    }
-    
-    console.log(`[validate-citations] Processing validation job creation for checkId: ${params.id}`)
+    const { id } = await params
+    console.log(`[validate-citations] POST request received for checkId: ${id}`)
+    console.log(`[validate-citations] Processing validation job creation for checkId: ${id}`)
 
     // Validate prisma is initialized
     if (!prisma) {
@@ -65,7 +57,7 @@ export async function POST(
 
     // Get the current CitationCheck
     const currentCheck = await prisma.citationCheck.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!currentCheck) {
@@ -128,12 +120,12 @@ export async function POST(
     const forceRerun = searchParams.get('force') === 'true' || searchParams.get('rerun') === 'true'
     
     // Check if job already exists
-    console.log(`[validate-citations] Checking for existing job for checkId: ${params.id}, forceRerun: ${forceRerun}`)
+    console.log(`[validate-citations] Checking for existing job for checkId: ${id}, forceRerun: ${forceRerun}`)
     const existingJob = await prisma.validationJob.findUnique({
-      where: { checkId: params.id },
+      where: { checkId: id },
     })
 
-    let checkIdToUse = params.id
+    let checkIdToUse = id
     let jsonDataToUse = jsonData
 
     if (existingJob) {
@@ -268,7 +260,7 @@ export async function POST(
           // Job might have been created between check and creation
           console.log("[validate-citations] Checking for existing job after constraint error")
           const existingJobAfterError = await prisma.validationJob.findUnique({
-            where: { checkId: params.id },
+            where: { checkId: id },
           })
           if (existingJobAfterError) {
             console.log(`[validate-citations] Found existing job: ${existingJobAfterError.id}`)
@@ -370,9 +362,10 @@ export async function POST(
 // GET endpoint - check for existing job or return error
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -389,7 +382,7 @@ export async function GET(
 
     // Check if a validation job exists for this check
     const job = await prisma.validationJob.findUnique({
-      where: { checkId: params.id },
+      where: { checkId: id },
     })
 
     if (job) {

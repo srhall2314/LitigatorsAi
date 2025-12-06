@@ -7,9 +7,10 @@ import { getCitationRiskLevel } from "@/lib/citation-identification/format-helpe
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
+    const { fileId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -26,7 +27,7 @@ export async function GET(
 
     // Get all citation checks for this file, ordered by version (newest first)
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "desc" },
       select: {
         id: true,

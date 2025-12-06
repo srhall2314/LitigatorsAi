@@ -8,9 +8,10 @@ import { randomUUID } from "crypto"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
+    const { fileId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -27,7 +28,7 @@ export async function GET(
 
     // Get all citation checks for this file
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "desc" },
       select: {
         id: true,
@@ -109,9 +110,10 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
+    const { fileId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -139,7 +141,7 @@ export async function POST(
 
     // Get the file upload
     const fileUpload = await prisma.fileUpload.findUnique({
-      where: { id: params.fileId },
+      where: { id: fileId },
     })
 
     if (!fileUpload) {
@@ -148,7 +150,7 @@ export async function POST(
 
     // Get the latest CitationCheck with JSON
     const latestCheck = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "desc" },
     })
 
@@ -205,7 +207,7 @@ export async function POST(
       // Create new CitationCheck version
       const newCheck = await prisma.citationCheck.create({
         data: {
-          fileUploadId: params.fileId,
+          fileUploadId: fileId,
           userId: user.id,
           version: latestVersion + i,
           status: "citations_validated",

@@ -5,9 +5,10 @@ import { prisma } from "@/lib/prisma"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { fileId: string; testRunId: string } }
+  { params }: { params: Promise<{ fileId: string; testRunId: string }> }
 ) {
   try {
+    const { fileId, testRunId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -24,7 +25,7 @@ export async function GET(
 
     // Get all citation checks for this file
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "asc" },
       select: {
         id: true,
@@ -39,7 +40,7 @@ export async function GET(
     const testRunChecks = checks.filter(check => {
       const jsonData = check.jsonData as any
       const metadata = jsonData?.document?.metadata
-      return metadata?.testRunId === params.testRunId
+      return metadata?.testRunId === testRunId
     })
 
     if (testRunChecks.length === 0) {
@@ -215,8 +216,8 @@ export async function GET(
 
     // Convert to array and sort by citationId
     const exportData = {
-      testRunId: params.testRunId,
-      fileId: params.fileId,
+      testRunId,
+      fileId,
       testRunTotal,
       runsCompleted: testRunChecks.length,
       exportedAt: new Date().toISOString(),
@@ -232,7 +233,7 @@ export async function GET(
     return NextResponse.json(exportData, {
       headers: {
         'Content-Type': 'application/json',
-        'Content-Disposition': `attachment; filename="test-run-${params.testRunId}-export.json"`,
+        'Content-Disposition': `attachment; filename="test-run-${testRunId}-export.json"`,
       },
     })
   } catch (error) {

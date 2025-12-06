@@ -6,9 +6,10 @@ import { parseWordDocument } from "@/lib/document-parser"
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { fileId: string } }
+  { params }: { params: Promise<{ fileId: string }> }
 ) {
   try {
+    const { fileId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -24,7 +25,7 @@ export async function POST(
     }
 
     const fileUpload = await prisma.fileUpload.findUnique({
-      where: { id: params.fileId },
+      where: { id: fileId },
       include: {
         citationChecks: {
           orderBy: { version: "desc" },

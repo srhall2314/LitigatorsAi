@@ -5,9 +5,10 @@ import { prisma } from "@/lib/prisma"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -23,7 +24,7 @@ export async function GET(
     }
 
     const citationCheck = await prisma.citationCheck.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         fileUpload: {
           include: {
@@ -55,9 +56,10 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -73,7 +75,7 @@ export async function PATCH(
     }
 
     const citationCheck = await prisma.citationCheck.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!citationCheck) {
@@ -86,7 +88,7 @@ export async function PATCH(
     // jsonData is the complete JSON blob structure (format TBD by parser)
     // All citation data, validation results, etc. will be stored within jsonData
     const updated = await prisma.citationCheck.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         ...(status && { status }),
         ...(jsonData !== undefined && { jsonData: jsonData as any }), // Type will be defined when parser is built

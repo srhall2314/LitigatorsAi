@@ -9,9 +9,10 @@ import { CitationDocument, Citation } from "@/types/citation-json"
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string; citationId: string } }
+  { params }: { params: Promise<{ id: string; citationId: string }> }
 ) {
   try {
+    const { id, citationId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -35,7 +36,7 @@ export async function POST(
 
     // Load CitationCheck by checkId
     const currentCheck = await prisma.citationCheck.findUnique({
-      where: { id: params.id },
+      where: { id },
     })
 
     if (!currentCheck) {
@@ -60,12 +61,12 @@ export async function POST(
     }
 
     const citationIndex = jsonData.document.citations.findIndex(
-      (c: Citation) => c.id === params.citationId
+      (c: Citation) => c.id === citationId
     )
 
     if (citationIndex === -1) {
       return NextResponse.json(
-        { error: `Citation ${params.citationId} not found` },
+        { error: `Citation ${citationId} not found` },
         { status: 404 }
       )
     }
@@ -73,7 +74,7 @@ export async function POST(
     const citation = jsonData.document.citations[citationIndex]
 
     // Extract context using extractDocumentContext
-    const context = extractDocumentContext(params.citationId, jsonData, true)
+    const context = extractDocumentContext(citationId, jsonData, true)
 
     // Run Tier 2 validation
     const validation = await validateCitationWithPanel(
@@ -105,7 +106,7 @@ export async function POST(
 
     // Update CitationCheck using PATCH to save updated jsonData
     const updated = await prisma.citationCheck.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         jsonData: jsonData as any,
       },

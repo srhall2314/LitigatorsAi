@@ -7,9 +7,10 @@ import { CitationDocument } from "@/types/citation-json"
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { fileId: string; runId: string } }
+  { params }: { params: Promise<{ fileId: string; runId: string }> }
 ) {
   try {
+    const { fileId, runId } = await params
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.email) {
@@ -18,7 +19,7 @@ export async function GET(
 
     // Get all checks for this file
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: params.fileId },
+      where: { fileUploadId: fileId },
       orderBy: { version: "asc" },
       select: {
         id: true,
@@ -35,7 +36,7 @@ export async function GET(
       .map(check => {
         const jsonData = check.jsonData as any
         const metadata = jsonData?.document?.metadata
-        const matches = metadata?.heavyAnalysisRunId === params.runId
+        const matches = metadata?.heavyAnalysisRunId === runId
         
         if (matches) {
           // Check if any citations have heavy_analysis
@@ -114,8 +115,8 @@ export async function GET(
     }, 0)
 
     return NextResponse.json({
-      runId: params.runId,
-      fileId: params.fileId,
+      runId,
+      fileId,
       totalRuns: runChecks.length,
       runs: runChecks.map(check => ({
         checkId: check.checkId,
