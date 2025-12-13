@@ -55,32 +55,75 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
         setLoading(true)
         let targetCheckId = initialCheckId
         
-        // Always fetch latest checkId from API to ensure we have the most current data
-        const fileRes = await fetch(`/api/citation-checker/files`)
-        if (fileRes.ok) {
-          const files = await fileRes.json()
-          const file = files.find((f: any) => f.id === fileId)
-          if (file?.citationChecks?.[0]) {
-            const latestCheckId = file.citationChecks[0].id
-            
-            // If no checkId provided in URL, use the latest
-            if (!targetCheckId) {
-              targetCheckId = latestCheckId
-              console.log(`[CitationsReportPage] No checkId in URL, using latest: ${targetCheckId}`)
+        // If checkId is provided in URL, use it directly
+        if (targetCheckId) {
+          console.log(`[CitationsReportPage] Using provided checkId from URL: ${targetCheckId}`)
+        } else {
+          // If no checkId provided, find the latest normal workflow check
+          console.log(`[CitationsReportPage] No checkId in URL, finding latest normal workflow check`)
+          const fileRes = await fetch(`/api/citation-checker/files`)
+          if (fileRes.ok) {
+            const files = await fileRes.json()
+            const file = files.find((f: any) => f.id === fileId)
+            if (file?.citationChecks && file.citationChecks.length > 0) {
+              // Find the latest check from normal workflow (not heavy analysis or test runs)
+              for (const check of file.citationChecks) {
+                // Use workflowType field if available
+                const workflowType = check.workflowType
+                const isNormalWorkflow = !workflowType || workflowType === "standard"
+                
+                if (!isNormalWorkflow) {
+                  // Skip if workflowType indicates it's not standard
+                  continue
+                }
+                
+                // Check if it has validation using workflow fields
+                const hasValidation = check.status === "citations_validated" || 
+                                     check.completedSteps?.includes("validate-citations") ||
+                                     (check.citationCount && check.citationCount > 0)
+                
+                // Fallback: check jsonData if available (for non-migrated records)
+                if (!hasValidation && check.jsonData) {
+                  const metadata = check.jsonData?.document?.metadata
+                  const hasHeavyAnalysisRun = metadata?.heavyAnalysisRunId
+                  const hasTestRun = metadata?.testRunId
+                  
+                  // Skip if it's from heavy analysis or test runs
+                  if (hasHeavyAnalysisRun || hasTestRun) {
+                    continue
+                  }
+                  
+                  const jsonHasValidation = check.jsonData?.document?.citations?.some(
+                    (citation: any) => citation.validation
+                  )
+                  
+                  if (jsonHasValidation) {
+                    targetCheckId = check.id
+                    console.log(`[CitationsReportPage] Found normal workflow check: ${targetCheckId}`)
+                    break
+                  }
+                } else if (hasValidation) {
+                  targetCheckId = check.id
+                  console.log(`[CitationsReportPage] Found normal workflow check: ${targetCheckId}`)
+                  break
+                }
+              }
+              
+              // If no normal workflow check found, use latest check as fallback
+              if (!targetCheckId && file.citationChecks[0]) {
+                targetCheckId = file.citationChecks[0].id
+                console.log(`[CitationsReportPage] No normal workflow check found, using latest: ${targetCheckId}`)
+              }
             } else {
-              // If checkId is provided in URL (e.g., from validation runs list), use it
-              // but log what the latest is for debugging
-              console.log(`[CitationsReportPage] Using provided checkId: ${targetCheckId}, latest is: ${latestCheckId}`)
+              console.warn(`[CitationsReportPage] No citation checks found for file: ${fileId}`)
+              setLoading(false)
+              return
             }
           } else {
-            console.warn(`[CitationsReportPage] No citation checks found for file: ${fileId}`)
+            console.error(`[CitationsReportPage] Failed to fetch files: ${fileRes.status}`)
             setLoading(false)
             return
           }
-        } else {
-          console.error(`[CitationsReportPage] Failed to fetch files: ${fileRes.status}`)
-          setLoading(false)
-          return
         }
         
         if (targetCheckId) {
@@ -89,6 +132,15 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
           const checkRes = await fetch(`/api/citation-checker/checks/${targetCheckId}`)
           if (checkRes.ok) {
             const data = await checkRes.json()
+            
+            console.log(`[CitationsReportPage] Loaded check data:`, {
+              checkId: targetCheckId,
+              hasJsonData: !!data.jsonData,
+              hasDocument: !!data.jsonData?.document,
+              citationsCount: data.jsonData?.document?.citations?.length || 0,
+              citationsWithValidation: data.jsonData?.document?.citations?.filter((c: any) => c.validation).length || 0,
+              metadata: data.jsonData?.document?.metadata
+            })
             
             // Set check metadata
             setCheckMetadata({
@@ -132,6 +184,14 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
               })
               
               setCitations(enrichedCitations)
+              
+              // Log if no citations with validation
+              const citationsWithValidation = enrichedCitations.filter((c: any) => c.validation)
+              if (citationsWithValidation.length === 0) {
+                console.warn(`[CitationsReportPage] No citations with validation found in check ${targetCheckId}`)
+              }
+            } else {
+              console.warn(`[CitationsReportPage] Check ${targetCheckId} has no jsonData.document`)
             }
             
             // Check if this is the current version
@@ -143,7 +203,13 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                 setCheckMetadata(prev => prev ? { ...prev, isCurrent: true } : null)
               }
             }
+          } else {
+            console.error(`[CitationsReportPage] Failed to fetch check ${targetCheckId}: ${checkRes.status}`)
+            const errorData = await checkRes.json().catch(() => ({}))
+            console.error(`[CitationsReportPage] Error details:`, errorData)
           }
+        } else {
+          console.warn(`[CitationsReportPage] No checkId found for file ${fileId}`)
         }
       } catch (err) {
         console.error('Failed to load report data:', err)
@@ -583,7 +649,7 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
           // Check Tier 3 first if it exists
           if (citation.tier_3) {
             const tier3Status = getTier3FinalStatus(citation.tier_3)
-            const consensus = citation.tier_3.consensus
+            const consensus = citation.tier_3?.consensus
             
             if (tier3Status === "VALID") {
               statusText = 'Status: VALID (Tier 3 Verified)'
@@ -743,6 +809,12 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
         >
           Print Report
         </button>
+        <Link
+          href={`/citation-checker/${fileId}/full-analysis${checkId ? `?checkId=${checkId}` : ''}`}
+          className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+        >
+          Continue to Full Analysis →
+        </Link>
         <button
           onClick={() => window.location.href = `/citation-checker`}
           className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
@@ -1041,6 +1113,27 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
           </div>
         )}
 
+        {/* Show message if no citations with validation */}
+        {citations.length > 0 && sortedCitations.length === 0 && (
+          <div className="mt-8 p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <h4 className="text-lg font-semibold text-yellow-900 mb-2">No Validated Citations Found</h4>
+            <p className="text-yellow-800 text-sm">
+              This check has {citations.length} citation{citations.length !== 1 ? 's' : ''}, but none have been validated yet.
+              Please run citation validation first.
+            </p>
+          </div>
+        )}
+
+        {/* Show message if no citations at all */}
+        {citations.length === 0 && !loading && (
+          <div className="mt-8 p-6 bg-gray-50 border border-gray-200 rounded-lg">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">No Citations Found</h4>
+            <p className="text-gray-700 text-sm">
+              This check does not have any citations. Please ensure citations have been identified first.
+            </p>
+          </div>
+        )}
+
         {/* Citation Details */}
         {sortedCitations.length > 0 && (
           <div className="mt-8">
@@ -1101,7 +1194,7 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                             
                             {/* Show Tier 3 risk level if it exists and overrides Tier 2 */}
                             {citation.tier_3 && (() => {
-                              const tier3Consensus = citation.tier_3.consensus
+                              const tier3Consensus = citation.tier_3?.consensus
                               const isNewFormatT3 = isNewFormatTier3Result(citation.tier_3)
                               
                               if (isNewFormatT3 && tier3Consensus?.final_risk_level) {
@@ -1467,16 +1560,16 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                         <h5 className="text-sm font-semibold text-purple-900 mb-3">Tier 3: Panel Investigation</h5>
                         <div className="space-y-3">
                           {/* Consensus Summary */}
-                          {citation.tier_3.consensus && (
+                          {citation.tier_3?.consensus && (
                             <div>
                               <div className="flex items-center gap-2 mb-2">
                                 <span className={`px-3 py-1 text-sm font-semibold rounded ${
-                                  (citation.tier_3.consensus.final_status === "VALID" || citation.tier_3.consensus.final_risk_level === "LOW_RISK") ? 'bg-green-100 text-green-800' :
-                                  (citation.tier_3.consensus.final_status === "FAIL" || citation.tier_3.consensus.final_risk_level === "NEEDS_ADDITIONAL_REVIEW") ? 'bg-red-100 text-red-800' :
+                                  (citation.tier_3.consensus?.final_status === "VALID" || citation.tier_3.consensus?.final_risk_level === "LOW_RISK") ? 'bg-green-100 text-green-800' :
+                                  (citation.tier_3.consensus?.final_status === "FAIL" || citation.tier_3.consensus?.final_risk_level === "NEEDS_ADDITIONAL_REVIEW") ? 'bg-red-100 text-red-800' :
                                   'bg-orange-100 text-orange-800'
                                 }`}>
                                   {(() => {
-                                    const consensus = citation.tier_3.consensus
+                                    const consensus = citation.tier_3?.consensus
                                     if (consensus?.final_risk_level) {
                                       const count = consensus.risk_level_counts?.LOW_RISK || 0
                                       return `${consensus.final_risk_level} (${count}/3 Low Risk)`
@@ -1488,11 +1581,11 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                                   })()}
                                 </span>
                                 <span className="px-2 py-1 text-xs font-medium rounded bg-gray-100 text-gray-800">
-                                  {citation.tier_3.consensus.agreement_level} ({Math.round(citation.tier_3.consensus.confidence_score * 100)}%)
+                                  {citation.tier_3.consensus?.agreement_level} ({Math.round((citation.tier_3.consensus?.confidence_score || 0) * 100)}%)
                                 </span>
                               </div>
                               <div className="text-xs text-gray-600 mb-2">
-                                {citation.tier_3.consensus.reasoning}
+                                {citation.tier_3.consensus?.reasoning}
                               </div>
                             </div>
                           )}
@@ -1562,21 +1655,21 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                           )}
                           
                           {/* Legacy reasoning display for backward compatibility */}
-                          {citation.tier_3.reasoning && !citation.tier_3.consensus && (
+                          {citation.tier_3?.reasoning && !citation.tier_3?.consensus && (
                             <div>
                               <div className="text-xs font-medium text-gray-700 mb-1">Reasoning</div>
                               <p className="text-sm text-gray-700">{citation.tier_3.reasoning}</p>
                             </div>
                           )}
                           
-                          {citation.tier_3.key_evidence && !citation.tier_3.consensus && (
+                          {citation.tier_3?.key_evidence && !citation.tier_3?.consensus && (
                             <div>
                               <div className="text-xs font-medium text-gray-700 mb-1">Key Evidence</div>
                               <p className="text-sm text-gray-700">{citation.tier_3.key_evidence}</p>
                             </div>
                           )}
                           
-                          {citation.tier_3.remaining_uncertainties && (
+                          {citation.tier_3?.remaining_uncertainties && (
                             <div>
                               <div className="text-xs font-medium text-gray-700 mb-1">Remaining Uncertainties</div>
                               <p className="text-sm text-gray-600 italic">{citation.tier_3.remaining_uncertainties}</p>
@@ -1587,7 +1680,7 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                     )}
 
                     {/* Verdict Summary */}
-                    {citation.tier_3.consensus && (
+                    {citation.tier_3?.consensus && (
                       <div className="p-3 bg-gray-50 rounded-md">
                         <div className="text-xs font-medium text-gray-600 mb-2">Verdict Summary</div>
                         <div className="flex items-center gap-4 text-sm">

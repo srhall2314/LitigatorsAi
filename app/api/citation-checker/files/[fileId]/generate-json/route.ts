@@ -135,6 +135,15 @@ export async function POST(
       },
     })
 
+    // Sync workflow fields from jsonData (non-blocking)
+    try {
+      const { syncWorkflowFields } = await import("@/lib/workflow/workflow-utils")
+      await syncWorkflowFields(prisma, citationCheck.id)
+    } catch (syncError) {
+      console.warn("[generate-json] Failed to sync workflow fields:", syncError)
+      // Don't fail the request if sync fails
+    }
+
     return NextResponse.json(updated)
   } catch (error) {
     console.error("Error generating JSON:", error)

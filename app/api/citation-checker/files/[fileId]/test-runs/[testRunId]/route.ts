@@ -37,6 +37,9 @@ export async function GET(
         createdAt: true,
         updatedAt: true,
         jsonData: true,
+        workflowType: true,
+        workflowId: true,
+        workflowMetadata: true,
       },
     })
     
@@ -44,12 +47,24 @@ export async function GET(
     // This helps avoid stale data issues
 
     // Filter checks that belong to this test run
+    // Use workflowId if available, fallback to jsonData for non-migrated records
     const testRunChecks = checks.filter(check => {
+      // Use workflowId from database if available
+      if (check.workflowType === "test_run" && check.workflowId === testRunId) {
+        const metadata = check.workflowMetadata as any
+        console.log(`[test-runs] Found test run check: ${check.id}, version: ${check.version}, testRunNumber: ${metadata?.testRunNumber}`)
+        const citations = (check.jsonData as any)?.document?.citations || []
+        const citationsWithValidation = citations.filter((c: any) => c.validation).length
+        console.log(`[test-runs] Check ${check.id} has ${citationsWithValidation}/${citations.length} citations with validation`)
+        return true
+      }
+      
+      // Fallback: check jsonData for non-migrated records
       const jsonData = check.jsonData as any
       const metadata = jsonData?.document?.metadata
       const matches = metadata?.testRunId === testRunId
       if (matches) {
-        console.log(`[test-runs] Found test run check: ${check.id}, version: ${check.version}, testRunNumber: ${metadata?.testRunNumber}`)
+        console.log(`[test-runs] Found test run check (from jsonData): ${check.id}, version: ${check.version}, testRunNumber: ${metadata?.testRunNumber}`)
         const citations = jsonData?.document?.citations || []
         const citationsWithValidation = citations.filter((c: any) => c.validation).length
         console.log(`[test-runs] Check ${check.id} has ${citationsWithValidation}/${citations.length} citations with validation`)

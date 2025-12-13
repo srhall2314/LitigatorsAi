@@ -28,15 +28,25 @@ export async function GET(
         createdAt: true,
         updatedAt: true,
         jsonData: true,
+        workflowType: true,
+        workflowId: true,
       },
     })
 
     // Filter checks that belong to this heavy analysis run
     const runChecks = checks
       .map(check => {
+        // Use workflowId from database if available, fallback to jsonData
         const jsonData = check.jsonData as any
         const metadata = jsonData?.document?.metadata
-        const matches = metadata?.heavyAnalysisRunId === runId
+        let matches = false
+        
+        if (check.workflowType === "heavy_analysis" && check.workflowId === runId) {
+          matches = true
+        } else {
+          // Fallback: check jsonData for non-migrated records
+          matches = metadata?.heavyAnalysisRunId === runId
+        }
         
         if (matches) {
           // Check if any citations have heavy_analysis

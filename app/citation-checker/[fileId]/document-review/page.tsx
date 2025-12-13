@@ -3,10 +3,10 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
-import { CitationsReportPage } from "../../components/CitationsReportPage"
+import { DocumentReviewPage } from "../../components/DocumentReviewPage"
 import { StepProgress } from "../../components/StepProgress"
 
-export default async function CitationsReportPageRoute({
+export default async function DocumentReviewPageRoute({
   params,
   searchParams,
 }: {
@@ -26,7 +26,7 @@ export default async function CitationsReportPageRoute({
     <div className="min-h-screen flex flex-col">
       <Header />
       <main className="flex-1 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="mb-8">
             <h1 className="text-4xl font-normal text-black mb-4">
               Citation Checker Workflow
@@ -37,21 +37,21 @@ export default async function CitationsReportPageRoute({
           </div>
 
           <StepProgress 
-            currentStep="citations-report" 
-            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations", "review-discrepancies"])}
+            currentStep="document-review" 
+            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations", "review-discrepancies", "citations-report", "full-analysis"])}
             fileId={fileId}
           />
 
           <div className="border border-gray-200 rounded-lg p-8 bg-white">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black mb-2">
-                Step 6: Citations Report
+                Step 8: Document Review
               </h2>
               <p className="text-black text-gray-600">
-                View the final citation validation report
+                Review your document by paragraph with analysis indicators
               </p>
             </div>
-            <CitationsReportPage fileId={fileId} checkId={checkId} />
+            <DocumentReviewPage fileId={fileId} checkId={checkId} />
           </div>
         </div>
       </main>

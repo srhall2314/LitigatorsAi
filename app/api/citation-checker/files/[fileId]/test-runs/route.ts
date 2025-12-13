@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { Prisma } from "@prisma/client"
 import { createValidationJob, retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-identification/queue"
 import { CitationDocument } from "@/types/citation-json"
 import { randomUUID } from "crypto"
@@ -26,20 +27,37 @@ export async function GET(
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // Get all citation checks for this file
+    // Get all citation checks for this file that are test runs
+    // Use workflowType field if available, fallback to checking jsonData
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: fileId },
+      where: { 
+        fileUploadId: fileId,
+        OR: [
+          { workflowType: "test_run" },
+          // Fallback for non-migrated records
+          {
+            workflowType: null,
+            jsonData: {
+              path: ["document", "metadata", "testRunId"],
+              not: Prisma.JsonNull,
+            },
+          },
+        ],
+      },
       orderBy: { version: "desc" },
       select: {
         id: true,
         version: true,
         createdAt: true,
         updatedAt: true,
+        workflowType: true,
+        workflowId: true,
+        workflowMetadata: true,
         jsonData: true,
       },
     })
 
-    // Group checks by testRunId
+    // Group checks by workflowId (testRunId)
     const testRunsMap = new Map<string, {
       testRunId: string
       testRunTotal: number
@@ -55,15 +73,31 @@ export async function GET(
     }>()
 
     for (const check of checks) {
-      const jsonData = check.jsonData as any
-      const metadata = jsonData?.document?.metadata
-      const testRunId = metadata?.testRunId
+      // Use workflowId from database if available, fallback to jsonData
+      let testRunId: string | null = null
+      let testRunNumber: number | null = null
+      let testRunTotal: number | null = null
+
+      if (check.workflowType === "test_run" && check.workflowId) {
+        // Use database fields
+        testRunId = check.workflowId
+        const metadata = check.workflowMetadata as any
+        testRunNumber = metadata?.testRunNumber || null
+        testRunTotal = metadata?.testRunTotal || null
+      } else {
+        // Fallback: extract from jsonData for non-migrated records
+        const jsonData = check.jsonData as any
+        const metadata = jsonData?.document?.metadata
+        testRunId = metadata?.testRunId
+        testRunNumber = metadata?.testRunNumber
+        testRunTotal = metadata?.testRunTotal
+      }
 
       if (testRunId) {
         if (!testRunsMap.has(testRunId)) {
           testRunsMap.set(testRunId, {
             testRunId,
-            testRunTotal: metadata?.testRunTotal || 0,
+            testRunTotal: testRunTotal || 0,
             createdAt: check.createdAt,
             updatedAt: check.updatedAt,
             runs: [],
@@ -74,7 +108,7 @@ export async function GET(
         testRun.runs.push({
           id: check.id,
           version: check.version,
-          runNumber: metadata?.testRunNumber || check.version,
+          runNumber: testRunNumber || check.version,
           createdAt: check.createdAt,
           updatedAt: check.updatedAt,
         })
@@ -197,14 +231,14 @@ export async function POST(
         })
       }
 
-      // Add test run metadata
+      // Add test run metadata to jsonData (for backward compatibility)
       if (freshJsonData.document?.metadata) {
         freshJsonData.document.metadata.testRunId = testRunId
         freshJsonData.document.metadata.testRunNumber = i
         freshJsonData.document.metadata.testRunTotal = numberOfRuns
       }
 
-      // Create new CitationCheck version
+      // Create new CitationCheck version with workflow tracking
       const newCheck = await prisma.citationCheck.create({
         data: {
           fileUploadId: fileId,
@@ -212,6 +246,18 @@ export async function POST(
           version: latestVersion + i,
           status: "citations_validated",
           jsonData: freshJsonData as any,
+          // Populate workflow fields
+          workflowType: "test_run",
+          workflowId: testRunId,
+          workflowMetadata: {
+            testRunNumber: i,
+            testRunTotal: numberOfRuns,
+          } as any,
+          documentMetadata: freshJsonData.document?.metadata as any,
+          citationCount: freshJsonData.document?.citations?.length || null,
+          identificationMethod: freshJsonData.document?.metadata?.identificationMethod || null,
+          completedSteps: ["upload", "generate-json", "identify-citations"],
+          currentStep: "validate-citations",
         },
       })
 

@@ -67,6 +67,7 @@ export async function POST(
     const nextVersion = latestVersion ? latestVersion.version + 1 : 1
 
     // Create new version by copying jsonData from base version (unprocessed JSON)
+    // Inherit workflow fields from source check
     const newVersion = await prisma.citationCheck.create({
       data: {
         fileUploadId: currentCheck.fileUploadId,
@@ -74,6 +75,14 @@ export async function POST(
         version: nextVersion,
         status: "citations_identified",
         jsonData: sourceCheck.jsonData as any, // Copy from base version (unprocessed)
+        // Inherit workflow fields from source check
+        workflowType: sourceCheck.workflowType || "standard",
+        workflowId: sourceCheck.workflowId || sourceCheck.id,
+        workflowMetadata: sourceCheck.workflowMetadata as any,
+        documentMetadata: sourceCheck.documentMetadata as any,
+        identificationMethod: "eyecite", // Set identification method
+        completedSteps: sourceCheck.completedSteps || ["upload", "generate-json"],
+        currentStep: "identify-citations",
       },
     })
 
@@ -117,6 +126,15 @@ export async function POST(
         status: "citations_identified",
       },
     })
+
+    // Sync workflow fields from updated jsonData (non-blocking)
+    try {
+      const { syncWorkflowFields } = await import("@/lib/workflow/workflow-utils")
+      await syncWorkflowFields(prisma, newVersion.id)
+    } catch (syncError) {
+      console.warn("[Eyecite API] Failed to sync workflow fields:", syncError)
+      // Don't fail the request if sync fails
+    }
 
     // Return updated check with logs for browser console
     return NextResponse.json({

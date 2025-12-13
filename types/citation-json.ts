@@ -172,6 +172,7 @@ export interface ContentParagraph {
   id: string; // para_001, heading_001, etc.
   level?: number; // For headings, 1-6
   text: string; // Text with inline citations marked as [CITATION:cit_001]...[/CITATION:cit_001]
+  notes?: string; // Optional reviewer notes for this paragraph
 }
 
 export interface CaseComponents {
@@ -285,6 +286,15 @@ export interface HeavyAnalysisResult {
   };
 }
 
+export type ManualReviewStatus = "approved" | "questionable" | null;
+
+export interface ManualReview {
+  status: ManualReviewStatus;
+  reviewedAt: string; // ISO 8601 timestamp
+  reviewedBy?: string; // User ID or email
+  notes?: string; // Optional notes from reviewer
+}
+
 export interface Citation {
   id: string; // cit_001, cit_002, etc.
   citationText: string; // Exact citation as it appears in document
@@ -296,6 +306,7 @@ export interface Citation {
   recommendations: CitationRecommendation[] | null; // null until Phase 2
   validation?: CitationValidation; // Tier 2 validation results (per validationT2.md)
   heavy_analysis?: HeavyAnalysisResult; // Heavy model full-document analysis
+  manualReview?: ManualReview; // Human reviewer decision
 }
 
 export interface CitationDocument {

@@ -12,22 +12,91 @@ export function UploadPage() {
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [fileChecksMap, setFileChecksMap] = useState<Record<string, any[]>>({})
+  const [loadingChecks, setLoadingChecks] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     loadFiles()
   }, [])
+
+  // No longer need to auto-load checks - we have all workflow info in the files list
+  // Individual checks are only loaded when user explicitly needs them (e.g., viewing a report)
 
   const loadFiles = async () => {
     try {
       const res = await fetch("/api/citation-checker/files")
       if (res.ok) {
         const data = await res.json()
+        console.log("[UploadPage] Loaded files:", data.length, "files")
+        console.log("[UploadPage] Sample file:", data[0] ? {
+          id: data[0].id,
+          name: data[0].originalName,
+          checksCount: data[0].citationChecks?.length || 0,
+          latestCheck: data[0].citationChecks?.[0] ? {
+            id: data[0].citationChecks[0].id,
+            status: data[0].citationChecks[0].status,
+            workflowType: data[0].citationChecks[0].workflowType
+          } : null
+        } : "No files")
         setFiles(data)
+      } else {
+        console.error("[UploadPage] Failed to load files:", res.status, res.statusText)
       }
     } catch (error) {
       console.error("Error loading files:", error)
     } finally {
       setLoadingFiles(false)
+    }
+  }
+
+  // Load all checks for a specific file (lazy loading)
+  const loadFileChecks = async (fileId: string) => {
+    if (fileChecksMap[fileId] || loadingChecks[fileId]) {
+      return // Already loaded or loading
+    }
+
+    setLoadingChecks(prev => ({ ...prev, [fileId]: true }))
+    try {
+      // First get validation runs to get check IDs
+      const runsRes = await fetch(`/api/citation-checker/files/${fileId}/validation-runs`)
+      const checkIds = new Set<string>()
+      
+      if (runsRes.ok) {
+        const runsData = await runsRes.json()
+        // Extract all check IDs from validation runs
+        for (const run of runsData.runs || []) {
+          if (run.id) {
+            checkIds.add(run.id)
+          }
+        }
+      }
+      
+      // Also get the latest check from files API
+      const file = files.find(f => f.id === fileId)
+      if (file?.citationChecks?.[0]) {
+        checkIds.add(file.citationChecks[0].id)
+      }
+      
+      // Fetch all checks in parallel
+      const checkPromises = Array.from(checkIds).map(async (checkId) => {
+        try {
+          const checkRes = await fetch(`/api/citation-checker/checks/${checkId}`)
+          if (checkRes.ok) {
+            return await checkRes.json()
+          }
+        } catch (err) {
+          console.error(`Error fetching check ${checkId}:`, err)
+        }
+        return null
+      })
+      
+      const allChecks = (await Promise.all(checkPromises)).filter((c): c is any => c !== null)
+      
+      setFileChecksMap(prev => ({ ...prev, [fileId]: allChecks }))
+    } catch (err) {
+      console.error(`Error loading checks for file ${fileId}:`, err)
+    } finally {
+      setLoadingChecks(prev => ({ ...prev, [fileId]: false }))
     }
   }
 
@@ -142,13 +211,27 @@ export function UploadPage() {
         ) : (
           <div className="space-y-3">
             {files.map((file) => {
-              const latestCheck = file.citationChecks[0]
-              const hasJson = latestCheck?.jsonData
+              // Ensure citationChecks is always an array
+              if (!file.citationChecks) {
+                file.citationChecks = []
+              }
+              // Safely get latest check - citationChecks might be empty array
+              const latestCheck = file.citationChecks && file.citationChecks.length > 0 
+                ? file.citationChecks[0] 
+                : null
               
-              // Check if document has a valid report (citations with validation)
-              const hasValidReport = latestCheck?.jsonData?.document?.citations?.some(
-                (citation: any) => citation.validation
-              ) || false
+              // Use status and workflow fields instead of checking jsonData
+              // Show file if it has a check (even if just uploaded)
+              const hasJson = latestCheck?.status && latestCheck.status !== "uploaded"
+              const workflowType = latestCheck?.workflowType
+              const isNormalWorkflow = !workflowType || workflowType === "standard"
+              
+              // Always show the file, even if it has no checks yet
+              
+              // Use the standardWorkflowCheck field from API (already filtered and validated)
+              // This ensures we find standard workflow checks even if latest check is a test run
+              const normalWorkflowCheck = (file as any).standardWorkflowCheck || null
+              const hasValidReport = normalWorkflowCheck !== null
               
               return (
                 <div
@@ -178,9 +261,9 @@ export function UploadPage() {
                       </div>
                     </div>
                     <div className="flex space-x-2">
-                      {hasValidReport && (
+                      {hasValidReport && normalWorkflowCheck && (
                         <button
-                          onClick={() => router.push(`/citation-checker/${file.id}/report`)}
+                          onClick={() => router.push(`/citation-checker/${file.id}/report?checkId=${normalWorkflowCheck.id}`)}
                           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
                         >
                           View Report
@@ -202,9 +285,9 @@ export function UploadPage() {
                           Heavy Analysis
                         </button>
                       )}
-                      {hasJson ? (
+                      {hasJson && latestCheck ? (
                         <button
-                          onClick={() => handleFileSelect(file.id, latestCheck!.id)}
+                          onClick={() => router.push(`/citation-checker/${file.id}/generate-json?checkId=${latestCheck.id}`)}
                           className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
                         >
                           Continue from JSON

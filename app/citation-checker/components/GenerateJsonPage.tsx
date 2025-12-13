@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ContextPanel } from "./ContextPanel"
 
 interface GenerateJsonPageProps {
@@ -10,6 +10,7 @@ interface GenerateJsonPageProps {
 
 export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [generating, setGenerating] = useState(false)
   const [jsonData, setJsonData] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -19,7 +20,24 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
   const loadCheckData = useCallback(async () => {
     setLoading(true)
     try {
-      // Check the file's latest check
+      // First, check if checkId was provided in query params
+      const queryCheckId = searchParams.get('checkId')
+      
+      if (queryCheckId) {
+        // Load the specific check
+        const checkRes = await fetch(`/api/citation-checker/checks/${queryCheckId}`)
+        if (checkRes.ok) {
+          const checkData = await checkRes.json()
+          setCheckId(checkData.id)
+          if (checkData.jsonData) {
+            setJsonData(JSON.stringify(checkData.jsonData, null, 2))
+            setLoading(false)
+            return
+          }
+        }
+      }
+      
+      // If no checkId in query or check doesn't have JSON, check the file's latest check
       const fileRes = await fetch(`/api/citation-checker/files`)
       if (fileRes.ok) {
         const files = await fileRes.json()
@@ -42,7 +60,7 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
     } finally {
       setLoading(false)
     }
-  }, [fileId])
+  }, [fileId, searchParams])
 
   useEffect(() => {
     loadCheckData()

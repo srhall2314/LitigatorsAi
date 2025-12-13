@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { Prisma } from "@prisma/client"
 import { runHeavyAnalysis, DEFAULT_MODELS } from "@/lib/citation-identification/heavy-analysis"
 import { CitationDocument } from "@/types/citation-json"
 import { readFileSync } from "fs"
@@ -22,20 +23,37 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Get all checks for this file
+    // Get all checks for this file that are heavy analysis runs
+    // Use workflowType field if available, fallback to checking jsonData
     const checks = await prisma.citationCheck.findMany({
-      where: { fileUploadId: fileId },
+      where: { 
+        fileUploadId: fileId,
+        OR: [
+          { workflowType: "heavy_analysis" },
+          // Fallback for non-migrated records
+          {
+            workflowType: null,
+            jsonData: {
+              path: ["document", "metadata", "heavyAnalysisRunId"],
+              not: Prisma.JsonNull,
+            },
+          },
+        ],
+      },
       orderBy: { version: "desc" },
       select: {
         id: true,
         version: true,
         createdAt: true,
         updatedAt: true,
+        workflowType: true,
+        workflowId: true,
+        workflowMetadata: true,
         jsonData: true,
       },
     })
 
-    // Group checks by heavyAnalysisRunId
+    // Group checks by workflowId (heavyAnalysisRunId)
     const runsMap = new Map<string, {
       runId: string
       runTotal: number
@@ -51,15 +69,31 @@ export async function GET(
     }>()
 
     for (const check of checks) {
-      const jsonData = check.jsonData as any
-      const metadata = jsonData?.document?.metadata
-      const runId = metadata?.heavyAnalysisRunId
+      // Use workflowId from database if available, fallback to jsonData
+      let runId: string | null = null
+      let runNumber: number | null = null
+      let runTotal: number | null = null
+
+      if (check.workflowType === "heavy_analysis" && check.workflowId) {
+        // Use database fields
+        runId = check.workflowId
+        const metadata = check.workflowMetadata as any
+        runNumber = metadata?.runNumber || null
+        runTotal = metadata?.runTotal || null
+      } else {
+        // Fallback: extract from jsonData for non-migrated records
+        const jsonData = check.jsonData as any
+        const metadata = jsonData?.document?.metadata
+        runId = metadata?.heavyAnalysisRunId
+        runNumber = metadata?.heavyAnalysisRunNumber
+        runTotal = metadata?.heavyAnalysisRunTotal
+      }
 
       if (runId) {
         if (!runsMap.has(runId)) {
           runsMap.set(runId, {
             runId,
-            runTotal: metadata?.heavyAnalysisRunTotal || 0,
+            runTotal: runTotal || 0,
             createdAt: check.createdAt,
             updatedAt: check.updatedAt,
             runs: [],
@@ -70,7 +104,7 @@ export async function GET(
         run.runs.push({
           id: check.id,
           version: check.version,
-          runNumber: metadata?.heavyAnalysisRunNumber || check.version,
+          runNumber: runNumber || check.version,
           createdAt: check.createdAt,
           updatedAt: check.updatedAt,
         })
@@ -253,7 +287,7 @@ export async function POST(
         })
       }
 
-      // Add run metadata
+      // Add run metadata to jsonData (for backward compatibility)
       if (freshJsonData.document?.metadata) {
         freshJsonData.document.metadata.heavyAnalysisRunId = runId
         freshJsonData.document.metadata.heavyAnalysisRunNumber = i
@@ -306,6 +340,20 @@ export async function POST(
               version: latestVersion + i,
               status: "heavy_analysis_complete",
               jsonData: updatedJsonData as any,
+              // Populate workflow fields
+              workflowType: "heavy_analysis",
+              workflowId: runId,
+              workflowMetadata: {
+                runNumber: i,
+                runTotal: numberOfRuns,
+                model,
+                provider,
+              } as any,
+              documentMetadata: updatedJsonData.document?.metadata as any,
+              citationCount: updatedJsonData.document?.citations?.length || null,
+              identificationMethod: updatedJsonData.document?.metadata?.identificationMethod || null,
+              completedSteps: ["upload", "generate-json", "identify-citations", "heavy-analysis"],
+              currentStep: "heavy-analysis",
             },
           })
           break

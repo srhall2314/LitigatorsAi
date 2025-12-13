@@ -3,10 +3,10 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
-import { CitationsReportPage } from "../../components/CitationsReportPage"
+import { FullAnalysisPage } from "../../components/FullAnalysisPage"
 import { StepProgress } from "../../components/StepProgress"
 
-export default async function CitationsReportPageRoute({
+export default async function FullAnalysisPageRoute({
   params,
   searchParams,
 }: {
@@ -37,21 +37,21 @@ export default async function CitationsReportPageRoute({
           </div>
 
           <StepProgress 
-            currentStep="citations-report" 
-            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations", "review-discrepancies"])}
+            currentStep="full-analysis" 
+            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations", "review-discrepancies", "citations-report"])}
             fileId={fileId}
           />
 
           <div className="border border-gray-200 rounded-lg p-8 bg-white">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black mb-2">
-                Step 6: Citations Report
+                Step 7: Full Document Analysis
               </h2>
               <p className="text-black text-gray-600">
-                View the final citation validation report
+                Run a comprehensive AI analysis of the entire document
               </p>
             </div>
-            <CitationsReportPage fileId={fileId} checkId={checkId} />
+            <FullAnalysisPage fileId={fileId} checkId={checkId} />
           </div>
         </div>
       </main>

@@ -91,6 +91,21 @@ model CitationCheck {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   
+  // NEW: Workflow tracking fields (all optional for backward compatibility)
+  workflowType      String?   // "standard" | "test_run" | "heavy_analysis" | "custom"
+  workflowId        String?   // UUID to group related checks (e.g., test runs, heavy analysis runs)
+  workflowStep      String?   // Current step in workflow
+  workflowMetadata  Json?     @db.JsonB // Additional workflow-specific metadata
+  
+  // NEW: Extracted metadata (for querying without parsing JSON)
+  documentMetadata  Json?     @db.JsonB // Extracted from jsonData.document.metadata
+  citationCount     Int?      // Total citations count
+  identificationMethod String? // "custom" | "eyecite"
+  
+  // NEW: Workflow state tracking
+  completedSteps    String[]  @default([]) // Array of completed step IDs
+  currentStep       String?   // Current active step
+  
   fileUpload    FileUpload @relation(fields: [fileUploadId], references: [id], onDelete: Cascade)
   user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   validationJob ValidationJob?
@@ -98,6 +113,8 @@ model CitationCheck {
   @@unique([fileUploadId, version])
   @@index([userId])
   @@index([fileUploadId])
+  @@index([workflowType, workflowId]) // For querying workflow groups
+  @@index([workflowType]) // For filtering by workflow type
 }
 
 model ValidationJob {

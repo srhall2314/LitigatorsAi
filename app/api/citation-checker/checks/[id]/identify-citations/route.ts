@@ -49,6 +49,7 @@ export async function POST(
     const nextVersion = latestVersion ? latestVersion.version + 1 : 1
 
     // Create new version (version 2) by copying jsonData from version 1
+    // Inherit workflow fields from parent check
     const newVersion = await prisma.citationCheck.create({
       data: {
         fileUploadId: currentCheck.fileUploadId,
@@ -56,6 +57,14 @@ export async function POST(
         version: nextVersion,
         status: "citations_identified",
         jsonData: currentCheck.jsonData as any, // Copy from version 1
+        // Inherit workflow fields from parent check
+        workflowType: currentCheck.workflowType || "standard",
+        workflowId: currentCheck.workflowId || currentCheck.id,
+        workflowMetadata: currentCheck.workflowMetadata as any,
+        documentMetadata: currentCheck.documentMetadata as any,
+        identificationMethod: currentCheck.identificationMethod,
+        completedSteps: currentCheck.completedSteps || ["upload", "generate-json"],
+        currentStep: "identify-citations",
       },
     })
 
@@ -71,6 +80,15 @@ export async function POST(
         status: "citations_identified",
       },
     })
+
+    // Sync workflow fields from updated jsonData (non-blocking)
+    try {
+      const { syncWorkflowFields } = await import("@/lib/workflow/workflow-utils")
+      await syncWorkflowFields(prisma, newVersion.id)
+    } catch (syncError) {
+      console.warn("[identify-citations] Failed to sync workflow fields:", syncError)
+      // Don't fail the request if sync fails
+    }
 
     return NextResponse.json(updated)
   } catch (error) {

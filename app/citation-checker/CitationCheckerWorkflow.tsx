@@ -1,7 +1,9 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useSearchParams } from "next/navigation"
 import { ValidationSummary } from "./components/ValidationSummary"
+import { CitationsReportPage } from "./components/CitationsReportPage"
 
 type WorkflowStep = 
   | "upload"
@@ -40,15 +42,37 @@ interface CitationCheck {
   version: number
   status: string
   jsonData: any | null // Complete JSON blob structure - format TBD by parser
+  // Workflow tracking fields (optional for backward compatibility)
+  workflowType?: string | null
+  workflowId?: string | null
+  workflowStep?: string | null
+  workflowMetadata?: any | null
+  documentMetadata?: any | null
+  citationCount?: number | null
+  identificationMethod?: string | null
+  completedSteps?: string[]
+  currentStep?: string | null
 }
 
-export function CitationCheckerWorkflow() {
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>("upload")
+interface CitationCheckerWorkflowProps {
+  initialFileId?: string | null
+  initialCheckId?: string | null
+  initialStep?: WorkflowStep
+}
+
+export function CitationCheckerWorkflow({ 
+  initialFileId = null, 
+  initialCheckId = null,
+  initialStep = "upload"
+}: CitationCheckerWorkflowProps = {}) {
+  const searchParams = useSearchParams()
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>(initialStep)
   const [completedSteps, setCompletedSteps] = useState<Set<WorkflowStep>>(new Set())
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
-  const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null)
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(initialFileId)
+  const [selectedCheckId, setSelectedCheckId] = useState<string | null>(initialCheckId)
   const [files, setFiles] = useState<FileUpload[]>([])
   const [loadingFiles, setLoadingFiles] = useState(true)
+  const [initializing, setInitializing] = useState(true)
 
   // Update selectedCheckId when it changes (e.g., after citation identification creates new version)
   const updateSelectedCheckId = (newCheckId: string) => {
@@ -62,24 +86,97 @@ export function CitationCheckerWorkflow() {
       if (res.ok) {
         const data = await res.json()
         setFiles(data)
+        return data
       } else {
         console.error("Failed to load files:", res.status, res.statusText)
         const errorData = await res.json().catch(() => ({}))
         console.error("Error details:", errorData)
+        return []
       }
     } catch (error) {
       console.error("Error loading files:", error)
       if (error instanceof Error) {
         console.error("Error details:", error.message, error.stack)
       }
+      return []
     } finally {
       setLoadingFiles(false)
     }
   }, [])
 
+  // Initialize workflow state from URL params or props
   useEffect(() => {
-    loadFiles()
-  }, [loadFiles])
+    const initializeWorkflow = async () => {
+      setInitializing(true)
+      
+      // Check URL search params first
+      const urlFileId = searchParams?.get('fileId')
+      const urlCheckId = searchParams?.get('checkId')
+      const urlStep = searchParams?.get('step') as WorkflowStep | null
+      
+      let fileId = urlFileId || initialFileId
+      let checkId = urlCheckId || initialCheckId
+      let step = urlStep || initialStep
+      
+      // Load files
+      const filesData = await loadFiles()
+      
+      // If no fileId provided, use the most recent file
+      if (!fileId && filesData.length > 0) {
+        const latestFile = filesData[0]
+        fileId = latestFile.id
+        
+        // Try to find checkId from the file
+        if (latestFile.citationChecks && latestFile.citationChecks.length > 0) {
+          // Prefer check with JSON, otherwise use latest
+          const checkWithJson = latestFile.citationChecks.find((check: any) => check.jsonData)
+          checkId = checkWithJson?.id || latestFile.citationChecks[0].id
+        }
+      }
+      
+      // If we have fileId but no checkId, try to load it from the file
+      if (fileId && !checkId && filesData.length > 0) {
+        const file = filesData.find((f: any) => f.id === fileId)
+        if (file && file.citationChecks && file.citationChecks.length > 0) {
+          const checkWithJson = file.citationChecks.find((check: any) => check.jsonData)
+          checkId = checkWithJson?.id || file.citationChecks[0].id
+        }
+      }
+      
+      // Update state
+      if (fileId) {
+        setSelectedFileId(fileId)
+      }
+      if (checkId) {
+        setSelectedCheckId(checkId)
+      }
+      if (step && step !== currentStep) {
+        setCurrentStep(step)
+      }
+      
+      // Determine completed steps based on what data exists
+      if (fileId && filesData.length > 0) {
+        const completed = new Set<WorkflowStep>(["upload"])
+        const file = filesData.find((f: any) => f.id === fileId)
+        
+        if (file && file.citationChecks && file.citationChecks.length > 0) {
+          const latestCheck = file.citationChecks[0]
+          if (latestCheck.jsonData) {
+            completed.add("generate-json")
+            if (latestCheck.jsonData?.document?.citations?.length > 0) {
+              completed.add("identify-citations")
+            }
+          }
+        }
+        setCompletedSteps(completed)
+      }
+      
+      setInitializing(false)
+    }
+    
+    initializeWorkflow()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run on mount
 
   const steps: StepConfig[] = [
     {
@@ -170,7 +267,13 @@ export function CitationCheckerWorkflow() {
       id: "citations-report",
       title: "Citations Report",
       description: "View the final citation validation report",
-      component: <CitationsReportStep fileId={selectedFileId} checkId={selectedCheckId} />,
+      component: selectedFileId ? (
+        <CitationsReportPage fileId={selectedFileId} checkId={selectedCheckId || undefined} />
+      ) : (
+        <div className="p-6 text-center">
+          <p className="text-gray-600">Please select a file first</p>
+        </div>
+      ),
     },
   ]
 
@@ -605,18 +708,63 @@ function GenerateJsonStep({
   const [jsonData, setJsonData] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [currentFileId, setCurrentFileId] = useState<string | null>(fileId)
+  const [currentCheckId, setCurrentCheckId] = useState<string | null>(checkId)
+
+  // Load fileId if not provided
+  useEffect(() => {
+    const loadFileId = async () => {
+      if (currentFileId) return
+      
+      try {
+        const fileRes = await fetch(`/api/citation-checker/files`)
+        if (fileRes.ok) {
+          const files = await fileRes.json()
+          if (files.length > 0) {
+            const latestFile = files[0]
+            setCurrentFileId(latestFile.id)
+            if (latestFile.citationChecks && latestFile.citationChecks.length > 0) {
+              const checkWithJson = latestFile.citationChecks.find((check: any) => check.jsonData)
+              const targetCheckId = checkWithJson?.id || latestFile.citationChecks[0].id
+              setCurrentCheckId(targetCheckId)
+              if (onCheckIdUpdate) {
+                onCheckIdUpdate(targetCheckId)
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[GenerateJsonStep] Error loading fileId:", error)
+      }
+    }
+    
+    loadFileId()
+  }, [currentFileId, onCheckIdUpdate])
+
+  // Update local state when props change
+  useEffect(() => {
+    if (fileId && fileId !== currentFileId) {
+      setCurrentFileId(fileId)
+    }
+    if (checkId && checkId !== currentCheckId) {
+      setCurrentCheckId(checkId)
+    }
+  }, [fileId, checkId, currentFileId, currentCheckId])
 
   const loadCheckData = useCallback(async () => {
     setLoading(true)
     try {
+      const targetFileId = currentFileId || fileId
+      const targetCheckId = currentCheckId || checkId
+      
       // First try to load from checkId if provided
-      if (checkId) {
-        console.log('[GenerateJsonStep] Loading check data for checkId:', checkId)
-        const res = await fetch(`/api/citation-checker/checks/${checkId}`)
+      if (targetCheckId) {
+        console.log('[GenerateJsonStep] Loading check data for checkId:', targetCheckId)
+        const res = await fetch(`/api/citation-checker/checks/${targetCheckId}`)
         if (res.ok) {
           const data = await res.json()
           if (data.jsonData) {
-            console.log('[GenerateJsonStep] Found JSON in check:', checkId)
+            console.log('[GenerateJsonStep] Found JSON in check:', targetCheckId)
             setJsonData(JSON.stringify(data.jsonData, null, 2))
             setLoading(false)
             return
@@ -625,12 +773,12 @@ function GenerateJsonStep({
       }
       
       // If no checkId or checkId doesn't have JSON, check the file's latest check
-      if (fileId) {
-        console.log('[GenerateJsonStep] Checking file for existing JSON:', fileId)
+      if (targetFileId) {
+        console.log('[GenerateJsonStep] Checking file for existing JSON:', targetFileId)
         const fileRes = await fetch(`/api/citation-checker/files`)
         if (fileRes.ok) {
           const files = await fileRes.json()
-          const file = files.find((f: any) => f.id === fileId)
+          const file = files.find((f: any) => f.id === targetFileId)
           if (file && file.citationChecks && file.citationChecks.length > 0) {
             // Find the latest check with JSON
             const checkWithJson = file.citationChecks.find((check: any) => check.jsonData)
@@ -638,7 +786,8 @@ function GenerateJsonStep({
               console.log('[GenerateJsonStep] Found JSON in file check:', checkWithJson.id)
               setJsonData(JSON.stringify(checkWithJson.jsonData, null, 2))
               // Update checkId to the one with JSON
-              if (onCheckIdUpdate && checkWithJson.id !== checkId) {
+              setCurrentCheckId(checkWithJson.id)
+              if (onCheckIdUpdate && checkWithJson.id !== targetCheckId) {
                 onCheckIdUpdate(checkWithJson.id)
               }
             } else {
@@ -652,20 +801,24 @@ function GenerateJsonStep({
     } finally {
       setLoading(false)
     }
-  }, [checkId, fileId, onCheckIdUpdate])
+  }, [currentCheckId, currentFileId, checkId, fileId, onCheckIdUpdate])
 
   useEffect(() => {
     loadCheckData()
   }, [loadCheckData])
 
   const handleGenerate = async (forceRegenerate = false) => {
-    if (!fileId) return
+    const targetFileId = currentFileId || fileId
+    if (!targetFileId) {
+      alert("No file selected. Please upload a file first.")
+      return
+    }
 
     setGenerating(true)
     try {
       const url = forceRegenerate 
-        ? `/api/citation-checker/files/${fileId}/generate-json?force=true`
-        : `/api/citation-checker/files/${fileId}/generate-json`
+        ? `/api/citation-checker/files/${targetFileId}/generate-json?force=true`
+        : `/api/citation-checker/files/${targetFileId}/generate-json`
       
       const res = await fetch(url, {
         method: "POST",
@@ -678,8 +831,11 @@ function GenerateJsonStep({
           setJsonData(JSON.stringify(data.jsonData, null, 2))
         }
         // Update checkId if a new version was created (regeneration) or if we got existing check
-        if (data.id && data.id !== checkId && onCheckIdUpdate) {
-          onCheckIdUpdate(data.id)
+        if (data.id) {
+          setCurrentCheckId(data.id)
+          if (data.id !== currentCheckId && data.id !== checkId && onCheckIdUpdate) {
+            onCheckIdUpdate(data.id)
+          }
         }
         // Only auto-advance if this was initial generation, not regeneration
         if (!forceRegenerate) {
@@ -758,7 +914,7 @@ function GenerateJsonStep({
           <div className="mt-4 flex space-x-4">
             <button
               onClick={() => handleGenerate(true)}
-              disabled={generating || !fileId}
+              disabled={generating || !currentFileId}
               className="px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
             >
               {generating ? "Regenerating JSON..." : "Regenerate JSON"}
@@ -775,7 +931,7 @@ function GenerateJsonStep({
         <>
           <button
             onClick={() => handleGenerate(false)}
-            disabled={generating || !fileId}
+            disabled={generating || !currentFileId}
             className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             {generating ? "Generating JSON..." : "Generate JSON"}
@@ -832,6 +988,12 @@ function GenerateJsonStep({
           )}
         </>
       )}
+      
+      <ContextPanel 
+        fileId={currentFileId || fileId}
+        checkId={currentCheckId || checkId}
+        showJson={true}
+      />
     </div>
   )
 }
@@ -853,10 +1015,92 @@ function IdentifyCitationsStep({
   const [error, setError] = useState<string | null>(null)
   const [currentCheckId, setCurrentCheckId] = useState<string | null>(checkId)
   const [identificationMethod, setIdentificationMethod] = useState<string | null>(null)
+  const [loadingCheckId, setLoadingCheckId] = useState(false)
+
+  // Load checkId from file if not provided
+  useEffect(() => {
+    const loadCheckId = async () => {
+      // If we already have a checkId from props, use it
+      if (checkId) {
+        setCurrentCheckId(checkId)
+        return
+      }
+      
+      if (currentCheckId || !fileId) return
+      
+      setLoadingCheckId(true)
+      try {
+        const fileRes = await fetch(`/api/citation-checker/files`)
+        if (fileRes.ok) {
+          const files = await fileRes.json()
+          const file = files.find((f: any) => f.id === fileId)
+          if (file && file.citationChecks && file.citationChecks.length > 0) {
+            // Find the latest check with JSON that is NOT from heavy analysis or test runs
+            // This is the normal workflow check we want to use
+            let targetCheck = null
+            
+            for (const check of file.citationChecks) {
+              if (!check.jsonData) continue
+              
+              // Use workflowType field if available, fallback to checking jsonData
+              const workflowType = check.workflowType
+              const isNormalWorkflow = !workflowType || workflowType === "standard"
+              
+              // Fallback: check jsonData for non-migrated records
+              if (!isNormalWorkflow) {
+                const metadata = check.jsonData?.document?.metadata
+                const hasHeavyAnalysisRun = metadata?.heavyAnalysisRunId
+                const hasTestRun = metadata?.testRunId
+                
+                // Skip if it's from heavy analysis or test runs
+                if (hasHeavyAnalysisRun || hasTestRun) {
+                  continue
+                }
+              } else if (workflowType && workflowType !== "standard") {
+                // Skip if workflowType indicates it's not standard
+                continue
+              }
+              
+              // This is a normal workflow check with JSON
+              targetCheck = check
+              break
+            }
+            
+            // If no normal workflow check found, use the latest check with JSON anyway
+            if (!targetCheck) {
+              targetCheck = file.citationChecks.find((check: any) => check.jsonData) || file.citationChecks[0]
+            }
+            
+            if (targetCheck) {
+              console.log('[IdentifyCitationsStep] Found check:', targetCheck.id)
+              setCurrentCheckId(targetCheck.id)
+              if (onCheckIdUpdate) {
+                onCheckIdUpdate(targetCheck.id)
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[IdentifyCitationsStep] Error loading checkId:", error)
+      } finally {
+        setLoadingCheckId(false)
+      }
+    }
+    
+    loadCheckId()
+  }, [fileId, checkId, currentCheckId, onCheckIdUpdate])
+
+  // Update currentCheckId when checkId prop changes
+  useEffect(() => {
+    if (checkId && checkId !== currentCheckId) {
+      setCurrentCheckId(checkId)
+    }
+  }, [checkId, currentCheckId])
 
   const handleIdentify = async (useEyecite: boolean = false) => {
-    if (!checkId) {
-      setError("No citation check selected")
+    const targetCheckId = currentCheckId || checkId
+    if (!targetCheckId) {
+      setError("No citation check selected. Please ensure JSON has been generated first.")
       return
     }
 
@@ -869,8 +1113,8 @@ function IdentifyCitationsStep({
     
     try {
       const endpoint = useEyecite 
-        ? `/api/citation-checker/checks/${checkId}/identify-citations-eyecite`
-        : `/api/citation-checker/checks/${checkId}/identify-citations`
+        ? `/api/citation-checker/checks/${targetCheckId}/identify-citations-eyecite`
+        : `/api/citation-checker/checks/${targetCheckId}/identify-citations`
       
       const res = await fetch(endpoint, {
         method: "POST",
@@ -961,25 +1205,35 @@ function IdentifyCitationsStep({
 
   return (
     <div className="space-y-6">
+      {loadingCheckId && (
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
+          <p className="text-blue-800 text-sm">Loading citation check data...</p>
+        </div>
+      )}
       <div className="space-y-4">
         <div>
           <h3 className="text-sm font-medium text-gray-700 mb-2">Citation Identification Method</h3>
           <div className="flex gap-4">
             <button
               onClick={() => handleIdentify(false)}
-              disabled={identifying || identifyingEyecite || !checkId}
+              disabled={identifying || identifyingEyecite || !currentCheckId || loadingCheckId}
               className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
             >
               {identifying ? "Identifying..." : "Identify Citations (Custom)"}
             </button>
             <button
               onClick={() => handleIdentify(true)}
-              disabled={identifying || identifyingEyecite || !checkId}
+              disabled={identifying || identifyingEyecite || !currentCheckId || loadingCheckId}
               className="px-6 py-3 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
             >
               {identifyingEyecite ? "Identifying..." : "Identify Citations (Eyecite)"}
             </button>
           </div>
+          {!currentCheckId && !loadingCheckId && (
+            <p className="text-sm text-red-600 mt-2">
+              No citation check found. Please ensure JSON has been generated in the previous step.
+            </p>
+          )}
         </div>
         {identificationMethod && (
           <div className="text-sm text-gray-600">
@@ -1226,58 +1480,3 @@ function ReviewDiscrepanciesStep({
   )
 }
 
-function CitationsReportStep({ fileId, checkId }: { fileId: string | null; checkId: string | null }) {
-  return (
-    <div className="space-y-6">
-      <div className="p-6 bg-gray-50 rounded-md">
-        <h3 className="text-lg font-semibold text-black mb-4">
-          Citation Validation Report
-        </h3>
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div>
-            <div className="text-sm text-gray-600">Total Citations</div>
-            <div className="text-2xl font-bold text-black">2</div>
-          </div>
-          <ValidationSummary
-            statistics={{
-              lowRisk: 1,
-              moderateRisk: 0,
-              needsReview: 1,
-              total: 2
-            }}
-            title=""
-            showTotal={false}
-            variant="compact"
-            className="col-span-3 p-0 bg-transparent"
-          />
-        </div>
-
-        <div className="mt-6">
-          <h4 className="font-semibold text-black mb-2">Summary</h4>
-          <p className="text-black text-sm">
-            Your document contains 2 citations. 1 citation is assessed as low risk,
-            while 1 citation needs additional review. Please review the discrepancies section
-            for details.
-          </p>
-        </div>
-      </div>
-
-      <div className="flex space-x-4">
-        <button className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
-          Download Report
-        </button>
-        <button className="px-6 py-3 border border-gray-300 text-black rounded-md hover:bg-gray-50">
-          Start New Check
-        </button>
-      </div>
-      
-      <ContextPanel 
-        fileId={fileId}
-        checkId={checkId}
-        showJson={true}
-        showCitationCount={true}
-        showValidationResults={true}
-      />
-    </div>
-  )
-}
