@@ -37,6 +37,24 @@ export async function GET(request: NextRequest) {
         citationChecks: {
           orderBy: { version: "desc" },
           take: 1, // Get latest version for display
+          select: {
+            id: true,
+            fileUploadId: true,
+            version: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            workflowType: true,
+            workflowId: true,
+            workflowStep: true,
+            workflowMetadata: true,
+            documentMetadata: true,
+            citationCount: true,
+            identificationMethod: true,
+            completedSteps: true,
+            currentStep: true,
+            // Explicitly exclude jsonData
+          },
         },
         user: {
           select: {
@@ -48,70 +66,91 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // For each file, also find the latest standard workflow check with validation
-    // This ensures we can show "View Report" even if latest check is a test run
-    // Use efficient query - exclude jsonData completely
-    const filesWithStandardChecks = await Promise.all(
-      files.map(async (file) => {
-        // Find latest standard workflow check with validation
-        // Use raw query to avoid Prisma type issues and exclude jsonData
-        const standardCheckResult = await prisma.$queryRaw<Array<{
-          id: string
-          fileUploadId: string
-          version: number
-          status: string
-          createdAt: Date
-          updatedAt: Date
-          workflowType: string | null
-          workflowId: string | null
-          workflowStep: string | null
-          workflowMetadata: any
-          documentMetadata: any
-          citationCount: number | null
-          identificationMethod: string | null
-          completedSteps: string[]
-          currentStep: string | null
-        }>>`
-          SELECT 
-            id, "fileUploadId", version, status, "createdAt", "updatedAt",
-            "workflowType", "workflowId", "workflowStep", "workflowMetadata",
-            "documentMetadata", "citationCount", "identificationMethod",
-            "completedSteps", "currentStep"
-          FROM "CitationCheck"
-          WHERE "fileUploadId" = ${file.id}
-            AND ("workflowType" = 'standard' OR "workflowType" IS NULL)
-            AND (status = 'citations_validated' OR "citationCount" > 0)
-          ORDER BY version DESC
-          LIMIT 1
-        `
-        
-        const standardCheck = standardCheckResult[0] || null
+    // Get all file IDs to batch query standard workflow checks
+    const fileIds = files.map(f => f.id)
+    
+    // Use a single efficient query to get all standard workflow checks for all files
+    // This replaces N+1 queries with a single query + JavaScript grouping
+    const allStandardChecks = fileIds.length > 0 ? await prisma.citationCheck.findMany({
+      where: {
+        fileUploadId: { in: fileIds },
+        AND: [
+          {
+            OR: [
+              { workflowType: "standard" },
+              { workflowType: null },
+            ],
+          },
+          {
+            OR: [
+              { status: "citations_validated" },
+              { citationCount: { gt: 0 } },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        fileUploadId: true,
+        version: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        workflowType: true,
+        workflowId: true,
+        workflowStep: true,
+        workflowMetadata: true,
+        documentMetadata: true,
+        citationCount: true,
+        identificationMethod: true,
+        completedSteps: true,
+        currentStep: true,
+        // Explicitly exclude jsonData
+      },
+      orderBy: [
+        { fileUploadId: "asc" },
+        { version: "desc" },
+      ],
+    }) : []
+    
+    // Group by fileUploadId and take the first (latest version) for each file
+    // Since results are already ordered by fileUploadId and version DESC, 
+    // we can just take the first occurrence of each fileUploadId
+    const standardChecksMap = new Map<string, typeof allStandardChecks[0]>()
+    for (const check of allStandardChecks) {
+      if (!standardChecksMap.has(check.fileUploadId)) {
+        standardChecksMap.set(check.fileUploadId, check)
+      }
+    }
 
-        // Extract only the fields we need (jsonData is already excluded from query)
-        const standardCheckData = standardCheck ? {
-          id: standardCheck.id,
-          fileUploadId: standardCheck.fileUploadId,
-          version: standardCheck.version,
-          status: standardCheck.status,
-          createdAt: standardCheck.createdAt,
-          updatedAt: standardCheck.updatedAt,
-          workflowType: (standardCheck as any).workflowType || null,
-          workflowId: (standardCheck as any).workflowId || null,
-          workflowStep: (standardCheck as any).workflowStep || null,
-          workflowMetadata: (standardCheck as any).workflowMetadata || null,
-          documentMetadata: (standardCheck as any).documentMetadata || null,
-          citationCount: (standardCheck as any).citationCount || null,
-          identificationMethod: (standardCheck as any).identificationMethod || null,
-          completedSteps: (standardCheck as any).completedSteps || [],
-          currentStep: (standardCheck as any).currentStep || null,
-        } : null
+    // Combine files with their standard workflow checks
+    const filesWithStandardChecks = files.map((file) => {
+      const standardCheck = standardChecksMap.get(file.id) || null
 
-        return {
-          ...file,
-          standardWorkflowCheck: standardCheckData, // Add the standard check separately
-        }
-      })
-    )
+      // Extract only the fields we need (jsonData is already excluded from query)
+      const standardCheckData = standardCheck ? {
+        id: standardCheck.id,
+        fileUploadId: standardCheck.fileUploadId,
+        version: standardCheck.version,
+        status: standardCheck.status,
+        createdAt: standardCheck.createdAt,
+        updatedAt: standardCheck.updatedAt,
+        workflowType: standardCheck.workflowType || null,
+        workflowId: standardCheck.workflowId || null,
+        workflowStep: standardCheck.workflowStep || null,
+        workflowMetadata: standardCheck.workflowMetadata || null,
+        documentMetadata: standardCheck.documentMetadata || null,
+        citationCount: standardCheck.citationCount || null,
+        identificationMethod: standardCheck.identificationMethod || null,
+        completedSteps: standardCheck.completedSteps || [],
+        currentStep: standardCheck.currentStep || null,
+      } : null
+
+      return {
+        ...file,
+        standardWorkflowCheck: standardCheckData, // Add the standard check separately
+      }
+    })
 
     // Serialize Date objects and ensure proper JSON serialization
     const serializedFiles = filesWithStandardChecks.map((file: any) => ({

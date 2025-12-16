@@ -81,6 +81,36 @@ export default async function DashboardPage() {
 
             <div className="border border-gray-200 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-black mb-2">
+                Heavy Model Analysis
+              </h2>
+              <p className="text-black mb-4">
+                Run comprehensive citation analysis using Claude Sonnet
+              </p>
+              <a
+                href="/heavy-analysis"
+                className="text-black underline hover:no-underline inline-block"
+              >
+                Open Heavy Analysis →
+              </a>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-black mb-2">
+                Multi-Run Test
+              </h2>
+              <p className="text-black mb-4">
+                Configure multi-run tests to assess validation consistency
+              </p>
+              <a
+                href="/test-run"
+                className="text-black underline hover:no-underline inline-block"
+              >
+                Open Test Run →
+              </a>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-black mb-2">
                 Citation Analysis
               </h2>
               <p className="text-black mb-4">

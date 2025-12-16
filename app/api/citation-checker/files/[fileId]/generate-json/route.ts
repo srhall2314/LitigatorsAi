@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { parseWordDocument } from "@/lib/document-parser"
+import { parseWordDocument, parseTextDocument } from "@/lib/document-parser"
 
 export async function POST(
   request: NextRequest,
@@ -105,15 +105,30 @@ export async function POST(
       )
     }
 
-    // Parse Word document to JSON structure
+    // Parse document to JSON structure (Word or text)
     let jsonData: any
     try {
       console.log('[generate-json] Starting document parse...')
-      jsonData = await parseWordDocument(
-        fileBuffer,
-        fileUpload.originalName,
-        fileUpload.createdAt.toISOString()
-      )
+      
+      // Check if this is a text file
+      if (fileUpload.mimeType === 'text/plain') {
+        // Parse as plain text
+        const text = new TextDecoder('utf-8').decode(fileBuffer)
+        console.log('[generate-json] Parsing as text document, text length:', text.length)
+        jsonData = await parseTextDocument(
+          text,
+          fileUpload.originalName,
+          fileUpload.createdAt.toISOString()
+        )
+      } else {
+        // Parse as Word document (existing behavior)
+        jsonData = await parseWordDocument(
+          fileBuffer,
+          fileUpload.originalName,
+          fileUpload.createdAt.toISOString()
+        )
+      }
+      
       console.log('[generate-json] Document parsed successfully, content blocks:', jsonData?.document?.content?.length || 0)
     } catch (error) {
       console.error("Error parsing document:", error)

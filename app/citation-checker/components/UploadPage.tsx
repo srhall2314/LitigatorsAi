@@ -269,22 +269,6 @@ export function UploadPage() {
                           View Report
                         </button>
                       )}
-                      {hasJson && (
-                        <button
-                          onClick={() => router.push(`/citation-checker/${file.id}/test-run/setup`)}
-                          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
-                        >
-                          Run Test
-                        </button>
-                      )}
-                      {hasJson && (
-                        <button
-                          onClick={() => router.push(`/citation-checker/${file.id}/heavy-analysis`)}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
-                        >
-                          Heavy Analysis
-                        </button>
-                      )}
                       {hasJson && latestCheck ? (
                         <button
                           onClick={() => router.push(`/citation-checker/${file.id}/generate-json?checkId=${latestCheck.id}`)}

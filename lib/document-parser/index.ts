@@ -293,3 +293,119 @@ export async function parseWordDocument(
   return document
 }
 
+/**
+ * Parse plain text document to JSON structure
+ * Converts plain text to the same CitationDocument structure as Word documents
+ */
+export async function parseTextDocument(
+  text: string,
+  filename: string,
+  uploadDate: string
+): Promise<CitationDocument> {
+  console.log('[parseTextDocument] Starting parse:', {
+    filename,
+    textLength: text.length,
+  })
+
+  // Normalize line breaks
+  const normalizedText = text
+    .replace(/\r\n/g, '\n') // Normalize Windows line breaks
+    .replace(/\r/g, '\n')   // Normalize Mac line breaks
+
+  // Split by double newlines (paragraph breaks), but preserve single newlines within paragraphs
+  let paragraphs = normalizedText
+    .split(/\n\s*\n+/) // Split by double or more newlines
+    .map((p) => p.replace(/\n/g, ' ').trim()) // Replace single newlines with spaces within paragraphs
+    .filter((p) => p.length > 0) // Remove empty paragraphs
+
+  // If we got very few paragraphs or one huge paragraph, try a different approach
+  if (paragraphs.length === 0) {
+    // No double newlines - split by single newlines
+    console.log('[parseTextDocument] No double newlines found, splitting by single newlines')
+    paragraphs = normalizedText
+      .split(/\n/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+  } else if (paragraphs.length === 1 && paragraphs[0].length > 2000) {
+    // One huge paragraph - try splitting by single newlines
+    console.log('[parseTextDocument] Single large paragraph detected, trying single newline split')
+    paragraphs = normalizedText
+      .split(/\n/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+  }
+
+  // Final safety: if still no paragraphs but we have text, treat entire text as one paragraph
+  if (paragraphs.length === 0 && text.trim().length > 0) {
+    console.log('[parseTextDocument] Treating entire text as single paragraph')
+    paragraphs = [text.trim()]
+  }
+
+  console.log('[parseTextDocument] Extracted', paragraphs.length, 'paragraphs from text')
+
+  // Process each paragraph/line
+  const content: ContentParagraph[] = []
+  let paraCounter = 1
+  let headingCounter = 1
+
+  paragraphs.forEach((para, index) => {
+    // Try to detect headings (lines that are short and might be headings)
+    const isLikelyHeading = para.length < 150 && 
+      (para.match(/^[IVX]+\.?\s+[A-Z]/) || // Roman numerals (I., II., III., etc.)
+       para.match(/^[A-Z][A-Z\s]{0,120}$/) || // All caps short line
+       para.match(/^[0-9]+\.\s+[A-Z]/) || // Numbered heading (1., 2., etc.)
+       para.match(/^[A-Z]\.\s+[A-Z]/)) // Letter heading (A., B., etc.)
+
+    if (isLikelyHeading) {
+      content.push({
+        type: 'heading',
+        id: `heading_${String(headingCounter).padStart(3, '0')}`,
+        level: 1, // Default to level 1, could be improved
+        text: para,
+      })
+      headingCounter++
+    } else {
+      content.push({
+        type: 'paragraph',
+        id: `para_${String(paraCounter).padStart(3, '0')}`,
+        text: para,
+      })
+      paraCounter++
+    }
+  })
+
+  // Validate that we have content
+  if (content.length === 0) {
+    console.error('[parseTextDocument] ERROR: No content extracted from document!')
+    throw new Error('Failed to extract any content from the document. The document may be empty.')
+  }
+
+  console.log('[parseTextDocument] Parsed', content.length, 'content blocks')
+
+  // Log sample of extracted content for debugging
+  console.log('[parseTextDocument] Sample content (first 3 blocks):')
+  content.slice(0, 3).forEach((block, idx) => {
+    console.log(`  [${idx}] ${block.type} (${block.id}): ${block.text.substring(0, 100)}...`)
+  })
+
+  // Create metadata
+  const metadata: CitationMetadata = {
+    filename,
+    uploadDate,
+    // documentType is optional, will be detected later if needed
+    totalCitations: 0, // Will be populated by citation identification
+  }
+
+  // Create document structure
+  const document: CitationDocument = {
+    document: {
+      metadata,
+      content,
+      citations: [], // Will be populated by citation identification
+    },
+  }
+
+  console.log('[parseTextDocument] Document structure created successfully')
+  return document
+}
+
