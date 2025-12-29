@@ -14,6 +14,9 @@ export function CaseList() {
   const [newCaseName, setNewCaseName] = useState("")
   const [newCaseDescription, setNewCaseDescription] = useState("")
   const [creating, setCreating] = useState(false)
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deletingCaseId, setDeletingCaseId] = useState<string | null>(null)
 
   useEffect(() => {
     loadCases()
@@ -83,12 +86,14 @@ export function CaseList() {
     }
   }
 
-  const handleDelete = async (caseId: string, e: React.MouseEvent) => {
+  const handleDeleteClick = (caseId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm("Are you sure you want to delete this case? Documents will be unassigned from the case.")) {
-      return
-    }
+    setOpenActionMenuId(null)
+    setConfirmDeleteId(caseId)
+  }
 
+  const handleDeleteConfirm = async (caseId: string) => {
+    setDeletingCaseId(caseId)
     try {
       const res = await fetch(`/api/citation-checker/cases/${caseId}`, {
         method: "DELETE",
@@ -96,6 +101,7 @@ export function CaseList() {
 
       if (res.ok) {
         await loadCases()
+        setConfirmDeleteId(null)
       } else {
         const errorData = await res.json()
         alert(`Failed to delete case: ${errorData.error || 'Unknown error'}`)
@@ -103,8 +109,46 @@ export function CaseList() {
     } catch (error) {
       console.error("Error deleting case:", error)
       alert("Failed to delete case. Please try again.")
+    } finally {
+      setDeletingCaseId(null)
     }
   }
+
+  const handleDeleteCancel = () => {
+    setConfirmDeleteId(null)
+  }
+
+  const handleCaseClick = (caseId: string) => {
+    router.push(`/citation-checker/cases/${caseId}`)
+  }
+
+  const getStatusBadge = (status: string | null | undefined) => {
+    if (!status) return null
+    
+    const statusConfig: Record<string, { label: string; color: string }> = {
+      active: { label: "Active", color: "bg-green-100 text-green-800 border border-green-200" },
+      closed: { label: "Closed", color: "bg-gray-100 text-gray-800 border border-gray-200" },
+      archived: { label: "Archived", color: "bg-yellow-100 text-yellow-800 border border-yellow-200" },
+    }
+    
+    const config = statusConfig[status] || { label: status, color: "bg-gray-100 text-gray-800 border border-gray-200" }
+    return (
+      <span className={`px-2.5 py-1 text-xs font-semibold rounded-md ${config.color}`}>
+        {config.label}
+      </span>
+    )
+  }
+
+  // Close action menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setOpenActionMenuId(null)
+    }
+    if (openActionMenuId) {
+      document.addEventListener("click", handleClickOutside)
+      return () => document.removeEventListener("click", handleClickOutside)
+    }
+  }, [openActionMenuId])
 
   if (loading) {
     return <p className="text-gray-500">Loading cases...</p>
@@ -116,26 +160,26 @@ export function CaseList() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           {/* Filters */}
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value as any)}
-          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="all">All Cases</option>
-          <option value="owned">My Cases</option>
-          <option value="member">Member Cases</option>
-        </select>
-        
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">All Statuses</option>
-          <option value="active">Active</option>
-          <option value="closed">Closed</option>
-          <option value="archived">Archived</option>
-        </select>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as any)}
+            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Cases</option>
+            <option value="owned">My Cases</option>
+            <option value="member">Member Cases</option>
+          </select>
+          
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="closed">Closed</option>
+            <option value="archived">Archived</option>
+          </select>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -149,61 +193,139 @@ export function CaseList() {
       {cases.length === 0 ? (
         <p className="text-gray-500">No cases found.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cases.map((case_) => (
-            <div
-              key={case_.id}
-              onClick={() => router.push(`/citation-checker/cases/${case_.id}`)}
-              className="p-6 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-md transition-all cursor-pointer bg-white"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="text-lg font-semibold text-black flex-1">
-                  {case_.name}
-                </h3>
-                {case_.status && (
-                  <span className={`px-2 py-1 text-xs font-semibold rounded-md ${
-                    case_.status === "active" ? "bg-green-100 text-green-800" :
-                    case_.status === "closed" ? "bg-gray-100 text-gray-800" :
-                    "bg-yellow-100 text-yellow-800"
-                  }`}>
-                    {case_.status}
-                  </span>
-                )}
-              </div>
-              
-              {case_.description && (
-                <p className="text-sm text-gray-600 mb-4 line-clamp-2">
-                  {case_.description}
-                </p>
-              )}
-              
-              <div className="space-y-2 text-sm text-gray-600">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">📄</span>
-                  <span>{case_._count?.documents || 0} document{case_._count?.documents !== 1 ? 's' : ''}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">👥</span>
-                  <span>{case_._count?.members || 0} member{case_._count?.members !== 1 ? 's' : ''}</span>
-                </div>
-                {case_.owner && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400">👤</span>
-                    <span>Owner: {case_.owner.name || case_.owner.email}</span>
+        <div className="space-y-2">
+          {cases.map((case_) => {
+            const isActionMenuOpen = openActionMenuId === case_.id
+            const isConfirmingDelete = confirmDeleteId === case_.id
+            
+            return (
+              <div
+                key={case_.id}
+                onClick={() => handleCaseClick(case_.id)}
+                className="p-4 border border-gray-200 rounded-md transition-all cursor-pointer bg-white hover:border-gray-300 hover:shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    {/* Case Name Row */}
+                    <div className="flex items-center gap-3 mb-2">
+                      <div 
+                        className="font-medium text-black truncate flex-1 min-w-0 cursor-pointer hover:text-indigo-600 hover:underline"
+                        title={case_.name}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          router.push(`/citation-checker/cases/${case_.id}`)
+                        }}
+                      >
+                        {case_.name}
+                      </div>
+                      {getStatusBadge(case_.status)}
+                    </div>
+                    
+                    {/* Description */}
+                    {case_.description && (
+                      <div className="text-sm text-gray-600 mb-2 line-clamp-2">
+                        {case_.description}
+                      </div>
+                    )}
+                    
+                    {/* Metadata Row */}
+                    <div className="flex items-center gap-3 flex-wrap mb-2">
+                      <span className="text-xs text-gray-500">
+                        {case_._count?.documents || 0} document{case_._count?.documents !== 1 ? 's' : ''}
+                      </span>
+                      <span className="text-xs text-gray-500">•</span>
+                      <span className="text-xs text-gray-500">
+                        {case_._count?.members || 0} member{case_._count?.members !== 1 ? 's' : ''}
+                      </span>
+                      {case_.owner && (
+                        <>
+                          <span className="text-xs text-gray-500">•</span>
+                          <span className="text-xs text-gray-500">
+                            Owner: {case_.owner.name || case_.owner.email}
+                          </span>
+                        </>
+                      )}
+                      <span className="text-xs text-gray-500">•</span>
+                      <span className="text-xs text-gray-500">
+                        {new Date(case_.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                )}
+                  
+                  {/* Action Menu */}
+                  <div className="relative flex-shrink-0">
+                    {isConfirmingDelete ? (
+                      <div 
+                        className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-md p-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="text-xs text-red-700 font-medium">Delete?</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteConfirm(case_.id)
+                          }}
+                          disabled={deletingCaseId === case_.id}
+                          className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deletingCaseId === case_.id ? "Deleting..." : "Yes"}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteCancel()
+                          }}
+                          disabled={deletingCaseId === case_.id}
+                          className="px-2 py-1 bg-gray-200 text-gray-700 rounded text-xs font-medium hover:bg-gray-300 disabled:opacity-50"
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenActionMenuId(isActionMenuOpen ? null : case_.id)
+                          }}
+                          className={`p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors ${
+                            isActionMenuOpen
+                              ? "bg-indigo-100 text-indigo-700"
+                              : "bg-gray-50 text-gray-600 hover:bg-gray-100 hover:text-gray-800 border border-gray-200"
+                          }`}
+                          title="Actions"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                          </svg>
+                        </button>
+                        
+                        {isActionMenuOpen && (
+                          <div 
+                            className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="py-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setOpenActionMenuId(null)
+                                  handleDeleteClick(case_.id, e)
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-              
-              <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end">
-                <button
-                  onClick={(e) => handleDelete(case_.id, e)}
-                  className="px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 text-xs font-medium"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
