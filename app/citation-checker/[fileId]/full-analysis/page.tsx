@@ -29,10 +29,10 @@ export default async function FullAnalysisPageRoute({
         <div className="max-w-5xl mx-auto">
           <div className="mb-8">
             <h1 className="text-4xl font-normal text-black mb-4">
-              Citation Checker Workflow
+              Document Workflow
             </h1>
             <p className="text-black text-lg">
-              Step-by-step citation validation process
+              Full document analysis and review
             </p>
           </div>
 

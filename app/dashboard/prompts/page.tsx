@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
+import { prisma } from "@/lib/prisma"
 import {
   getCitationAuthorityValidatorPrompt,
   getCaseEcologyValidatorPrompt,
@@ -22,6 +23,14 @@ export default async function PromptsPage() {
 
   if (!session?.user?.email) {
     redirect("/auth/signin")
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+  })
+
+  if (user?.role !== "admin") {
+    redirect("/dashboard")
   }
 
   // Create example citation and context to generate actual prompts

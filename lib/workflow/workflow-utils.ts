@@ -202,11 +202,13 @@ export async function createWorkflowCheck(
 
 /**
  * Mark a workflow step as completed
+ * @param userId - User ID completing the step (for access control and assignment tracking)
  */
 export async function markStepCompleted(
   prisma: PrismaClient,
   checkId: string,
-  step: WorkflowStep
+  step: WorkflowStep,
+  userId?: string
 ): Promise<void> {
   const check = await prisma.citationCheck.findUnique({
     where: { id: checkId },
@@ -214,6 +216,15 @@ export async function markStepCompleted(
   
   if (!check) {
     throw new Error(`CitationCheck not found: ${checkId}`);
+  }
+  
+  // Check access if userId provided
+  if (userId) {
+    const { canModifyWorkflow } = await import("@/lib/access-control");
+    const canModify = await canModifyWorkflow(userId, checkId);
+    if (!canModify) {
+      throw new Error(`Unauthorized: Cannot modify workflow for check ${checkId}`);
+    }
   }
   
   const completedSteps = check.completedSteps || [];
@@ -230,11 +241,36 @@ export async function markStepCompleted(
     ? config.steps[currentIndex + 1]
     : null;
   
+  // Update assignment if userId provided
+  const updateData: any = {
+    completedSteps,
+    currentStep: nextStep,
+  };
+  
+  if (userId) {
+    updateData.assignedToId = userId;
+    updateData.assignedAt = new Date();
+  }
+  
+  await prisma.citationCheck.update({
+    where: { id: checkId },
+    data: updateData,
+  });
+}
+
+/**
+ * Assign a check to a user (for soft routing)
+ */
+export async function assignCheckToUser(
+  prisma: PrismaClient,
+  checkId: string,
+  userId: string
+): Promise<void> {
   await prisma.citationCheck.update({
     where: { id: checkId },
     data: {
-      completedSteps,
-      currentStep: nextStep,
+      assignedToId: userId,
+      assignedAt: new Date(),
     },
   });
 }

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
 import { TestRunResultsPage } from "../../../../components/TestRunResultsPage"
+import { prisma } from "@/lib/prisma"
 
 export default async function TestRunResultsPageRoute({
   params,
@@ -14,6 +15,14 @@ export default async function TestRunResultsPageRoute({
 
   if (!session?.user?.email) {
     redirect("/auth/signin")
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+  })
+
+  if (user?.role !== "admin") {
+    redirect("/dashboard")
   }
 
   return (

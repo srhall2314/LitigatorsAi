@@ -28,7 +28,7 @@ export default function SignInPage() {
       if (result?.error) {
         setError("Invalid email or password")
       } else {
-        router.push("/dashboard")
+        router.push("/citation-checker")
         router.refresh()
       }
     } catch (error) {

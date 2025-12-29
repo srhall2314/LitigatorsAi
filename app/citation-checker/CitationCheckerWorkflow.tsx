@@ -29,6 +29,25 @@ interface FileUpload {
   blobUrl: string | null
   createdAt: string
   citationChecks: CitationCheck[]
+  standardWorkflowCheck?: CitationCheck | null
+  accessLevel?: 'owner' | 'edit' | 'view' | 'route' | null
+  shares?: Array<{
+    id: string
+    permission: string
+    routedFromId?: string | null
+    routedAt?: string | null
+    createdAt: string
+    sharedBy?: {
+      id: string
+      name: string | null
+      email: string
+    }
+    routedFrom?: {
+      id: string
+      name: string | null
+      email: string
+    } | null
+  }>
   user?: {
     id: string
     name: string | null
@@ -52,6 +71,14 @@ interface CitationCheck {
   identificationMethod?: string | null
   completedSteps?: string[]
   currentStep?: string | null
+  // Assignment tracking for soft routing
+  assignedToId?: string | null
+  assignedAt?: string | null
+  assignedTo?: {
+    id: string
+    name: string | null
+    email: string
+  } | null
 }
 
 interface CitationCheckerWorkflowProps {
@@ -197,16 +224,40 @@ export function CitationCheckerWorkflow({
             setSelectedCheckId(checkId)
             const file = files.find(f => f.id === fileId)
             if (file) {
-              const hasJson = file.citationChecks[0]?.jsonData
-              if (hasJson) {
-                // JSON already exists, jump to generate-json step
-                setCurrentStep("generate-json")
-                setCompletedSteps(new Set(["upload"]))
-              } else {
-                // No JSON yet, navigate to generate-json step to create it
-                setCurrentStep("generate-json")
-                setCompletedSteps(new Set(["upload"]))
+              // Use standardWorkflowCheck if available, otherwise use latest check
+              const check = file.standardWorkflowCheck || file.citationChecks[0]
+              const currentStepFromCheck = check?.currentStep
+              const completedStepsFromCheck = check?.completedSteps || []
+              
+              // All workflow steps in order
+              const allSteps: WorkflowStep[] = ["upload", "generate-json", "identify-citations", "validate-citations", "review-discrepancies", "citations-report"]
+              
+              // Map workflow step to WorkflowStep type
+              const stepMap: Record<string, WorkflowStep> = {
+                "generate-json": "generate-json",
+                "identify-citations": "identify-citations",
+                "validate-citations": "validate-citations",
+                "review-discrepancies": "review-discrepancies",
+                "citations-report": "citations-report",
               }
+              
+              // Determine which step to navigate to
+              let targetStep: WorkflowStep = "generate-json" // Default
+              if (currentStepFromCheck && stepMap[currentStepFromCheck]) {
+                targetStep = stepMap[currentStepFromCheck]
+              } else if (completedStepsFromCheck.length > 0) {
+                // If we have completed steps but no current step, go to the next uncompleted step
+                const lastCompleted = completedStepsFromCheck[completedStepsFromCheck.length - 1]
+                const lastCompletedIndex = allSteps.indexOf(lastCompleted as WorkflowStep)
+                if (lastCompletedIndex >= 0 && lastCompletedIndex < allSteps.length - 1) {
+                  targetStep = allSteps[lastCompletedIndex + 1]
+                }
+              }
+              
+              // Set completed steps
+              const completed = new Set<WorkflowStep>(["upload", ...completedStepsFromCheck.filter(s => allSteps.includes(s as WorkflowStep)) as WorkflowStep[]])
+              setCompletedSteps(completed)
+              setCurrentStep(targetStep)
             }
           }}
           onRefresh={loadFiles}
@@ -532,6 +583,58 @@ function UploadStep({
     return (bytes / (1024 * 1024)).toFixed(2) + " MB"
   }
 
+  const getStatusBadge = (status: string | undefined) => {
+    if (!status) return null
+    
+    const statusConfig: Record<string, { label: string; color: string }> = {
+      uploaded: { label: "Uploaded", color: "bg-gray-100 text-gray-800 border border-gray-200" },
+      json_generated: { label: "JSON Generated", color: "bg-blue-100 text-blue-800 border border-blue-200" },
+      citations_identified: { label: "Citations Identified", color: "bg-purple-100 text-purple-800 border border-purple-200" },
+      citations_validated: { label: "Citations Validated", color: "bg-green-100 text-green-800 border border-green-200" },
+      discrepancies_reviewed: { label: "Discrepancies Reviewed", color: "bg-yellow-100 text-yellow-800 border border-yellow-200" },
+      report_generated: { label: "Report Generated", color: "bg-indigo-100 text-indigo-800 border border-indigo-200" },
+    }
+    
+    const config = statusConfig[status] || { label: status, color: "bg-gray-100 text-gray-800 border border-gray-200" }
+    return (
+      <span className={`px-2.5 py-1 text-xs font-semibold rounded-md ${config.color}`}>
+        {config.label}
+      </span>
+    )
+  }
+
+  const getAccessLevelBadge = (accessLevel: string | undefined) => {
+    if (!accessLevel) return null
+    
+    const levelConfig: Record<string, { label: string; color: string }> = {
+      owner: { label: "Owner", color: "bg-indigo-100 text-indigo-800 border border-indigo-200" },
+      edit: { label: "Can Edit", color: "bg-green-100 text-green-800 border border-green-200" },
+      view: { label: "View Only", color: "bg-gray-100 text-gray-800 border border-gray-200" },
+      route: { label: "Can Route", color: "bg-blue-100 text-blue-800 border border-blue-200" },
+    }
+    
+    const config = levelConfig[accessLevel] || { label: accessLevel, color: "bg-gray-100 text-gray-800 border border-gray-200" }
+    return (
+      <span className={`px-2.5 py-1 text-xs font-semibold rounded-md ${config.color}`}>
+        {config.label}
+      </span>
+    )
+  }
+
+  const getCurrentStepLabel = (currentStep: string | null | undefined) => {
+    if (!currentStep) return null
+    
+    const stepLabels: Record<string, string> = {
+      "generate-json": "Generate JSON",
+      "identify-citations": "Identify Citations",
+      "validate-citations": "Validate Citations",
+      "review-discrepancies": "Review Discrepancies",
+      "citations-report": "Citations Report",
+    }
+    
+    return stepLabels[currentStep] || currentStep
+  }
+
   const handleDeleteClick = (fileId: string, e: React.MouseEvent) => {
     e.stopPropagation() // Prevent triggering file select
     setConfirmDeleteId(fileId)
@@ -600,58 +703,117 @@ function UploadStep({
         ) : (
           <div className="space-y-3">
             {files.map((file) => {
+              // Use standardWorkflowCheck if available, otherwise use latest check
+              const check = file.standardWorkflowCheck || file.citationChecks[0]
               const latestCheck = file.citationChecks[0]
-              const hasJson = latestCheck?.jsonData
+              const status = check?.status
+              const currentStep = check?.currentStep
+              const citationCount = check?.citationCount
+              
+              // Get routing information
+              const assignedTo = latestCheck?.assignedTo
+              const routedShare = file.shares?.find(share => share.routedFromId)
+              const routedFrom = routedShare?.routedFrom
+              
+              // Determine which check ID to use
+              const checkId = check?.id || latestCheck?.id || ""
               
               return (
                 <div
                   key={file.id}
-                  className="p-4 border border-gray-200 rounded-md hover:bg-gray-50"
+                  className="p-4 border border-gray-200 rounded-md hover:border-gray-300 transition-colors bg-white"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="font-medium text-black">{file.originalName}</div>
-                      <div className="text-sm text-gray-500">
-                        {formatFileSize(file.fileSize)} • {new Date(file.createdAt).toLocaleDateString()}
-                        {file.user && (
-                          <span className="ml-2 text-gray-400">
-                            by {file.user.name || file.user.email}
-                          </span>
-                        )}
-                        {hasJson && (
-                          <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded">
-                            JSON Generated
-                          </span>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      {/* File Name */}
+                      <div className="font-medium text-black truncate mb-3">
+                        {file.originalName}
+                      </div>
+                      
+                      {/* Status Section - Current State Indicators */}
+                      <div className="mb-3 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Status:</span>
+                          {getStatusBadge(status)}
+                          {getAccessLevelBadge(file.accessLevel || undefined)}
+                        </div>
+                      </div>
+                      
+                      {/* Workflow Section - Progress Information */}
+                      {(currentStep || citationCount !== null) && (
+                        <div className="mb-3 p-2 bg-blue-50 border border-blue-100 rounded-md">
+                          <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1.5">Workflow</div>
+                          <div className="space-y-1 text-xs text-blue-900">
+                            {currentStep && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-blue-600">●</span>
+                                <span>Current: <span className="font-medium">{getCurrentStepLabel(currentStep)}</span></span>
+                              </div>
+                            )}
+                            {citationCount !== null && citationCount !== undefined && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-blue-600">●</span>
+                                <span>Citations: <span className="font-medium">{citationCount}</span></span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Metadata Section - File Info & Routing */}
+                      <div className="space-y-1.5 text-sm text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-400">📄</span>
+                          <span>{formatFileSize(file.fileSize)} • {new Date(file.createdAt).toLocaleDateString()}</span>
+                          {file.user && (
+                            <span className="text-gray-400">
+                              by {file.user.name || file.user.email}
+                            </span>
+                          )}
+                        </div>
+                        
+                        {(assignedTo || routedFrom) && (
+                          <div className="pt-1.5 border-t border-gray-100 space-y-1">
+                            {assignedTo && (
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="text-gray-400">👤</span>
+                                <span>Assigned to: <span className="font-medium text-gray-700">{assignedTo.name || assignedTo.email}</span></span>
+                              </div>
+                            )}
+                            {routedFrom && (
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="text-gray-400">↪️</span>
+                                <span>Routed from: <span className="font-medium text-gray-700">{routedFrom.name || routedFrom.email}</span></span>
+                                {routedShare?.routedAt && (
+                                  <span className="text-gray-400">
+                                    ({new Date(routedShare.routedAt).toLocaleDateString()})
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
-                    <div className="flex space-x-2">
-                      {hasJson ? (
+                    
+                    {/* Action Section - Interactive Buttons */}
+                    <div className="flex flex-col gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => onFileSelect(file.id, checkId)}
+                        disabled={!checkId}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shadow-sm transition-all"
+                      >
+                        {currentStep ? "Continue" : "Select"}
+                      </button>
+                      {file.accessLevel === 'owner' && (
                         <button
-                          onClick={() => onFileSelect(file.id, latestCheck!.id)}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
+                          onClick={(e) => handleDeleteClick(file.id, e)}
+                          disabled={deletingFileId === file.id}
+                          className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
                         >
-                          Continue from JSON
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            const checkId = latestCheck?.id || ""
-                            onFileSelect(file.id, checkId)
-                          }}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                          disabled={!latestCheck}
-                        >
-                          Select & Generate JSON
+                          {deletingFileId === file.id ? "Deleting..." : "Delete"}
                         </button>
                       )}
-                      <button
-                        onClick={(e) => handleDeleteClick(file.id, e)}
-                        disabled={deletingFileId === file.id}
-                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {deletingFileId === file.id ? "Deleting..." : "Delete"}
-                      </button>
                     </div>
                   </div>
                 </div>

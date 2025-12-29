@@ -558,6 +558,14 @@ export default async function AnalysisPage() {
     redirect("/auth/signin")
   }
 
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+  })
+
+  if (user?.role !== "admin") {
+    redirect("/dashboard")
+  }
+
   const stats = await getAnalysisData()
 
   if (!stats) {
@@ -605,7 +613,7 @@ export default async function AnalysisPage() {
               Citation Analysis
             </h1>
             <p className="text-black text-lg">
-              Statistics and insights on citation validation performance
+              Statistics and insights on document citation validation performance
             </p>
           </div>
 

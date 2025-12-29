@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { ContentParagraph, Citation, AgentVerdict, ValidationVerdict } from "@/types/citation-json"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import { isNewFormatCitationValidation, getCitationRiskLevel } from "@/lib/citation-identification/format-helpers"
@@ -23,6 +24,7 @@ interface CitationIndicator {
 }
 
 export function DocumentReviewPage({ fileId, checkId: initialCheckId }: DocumentReviewPageProps) {
+  const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [paragraphs, setParagraphs] = useState<ParagraphWithCitations[]>([])
@@ -38,6 +40,7 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
   const [editingNotes, setEditingNotes] = useState<{ paragraphId: string; notes: string } | null>(null)
   const [notesText, setNotesText] = useState<string>("")
   const [savingNotes, setSavingNotes] = useState(false)
+  const [showBackToEditorWarning, setShowBackToEditorWarning] = useState(false)
 
   useEffect(() => {
     const loadDocument = async () => {
@@ -356,6 +359,39 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
     }
   }
 
+  const hasManualReviews = () => {
+    const allCitations = paragraphs.flatMap(p => p.citations)
+    return allCitations.some(c => 
+      c.manualReview?.status === "approved" || 
+      c.manualReview?.status === "questionable"
+    )
+  }
+
+  const getManualReviewCount = () => {
+    const allCitations = paragraphs.flatMap(p => p.citations)
+    return {
+      approved: allCitations.filter(c => c.manualReview?.status === "approved").length,
+      questionable: allCitations.filter(c => c.manualReview?.status === "questionable").length,
+      total: allCitations.filter(c => 
+        c.manualReview?.status === "approved" || 
+        c.manualReview?.status === "questionable"
+      ).length
+    }
+  }
+
+  const handleBackToEditor = () => {
+    if (hasManualReviews()) {
+      setShowBackToEditorWarning(true)
+    } else {
+      router.push(`/citation-checker/create-document?fileId=${fileId}`)
+    }
+  }
+
+  const handleConfirmBackToEditor = () => {
+    setShowBackToEditorWarning(false)
+    router.push(`/citation-checker/create-document?fileId=${fileId}`)
+  }
+
   const toggleCitationDetails = (citationId: string) => {
     setExpandedCitations(prev => {
       const next = new Set(prev)
@@ -375,6 +411,15 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
       'temporal_reality_validator_v1': 'Temporal Specialist',
       'legal_knowledge_validator_v1': 'Knowledge Generalist',
       'reality_assessment_expert_v1': 'Reality Generalist',
+    }
+    return names[agentName] || agentName
+  }
+
+  const getTier3AgentDisplayName = (agentName: string) => {
+    const names: Record<string, string> = {
+      'tier3_rigorous_legal_investigator_v1': 'Senior Litigator Reviewer (20+ Years)',
+      'tier3_holistic_legal_analyst_v1': 'Specialist Legal Researcher',
+      'tier3_pattern_recognition_expert_v1': 'Appellate Clerk / Judicial Reviewer',
     }
     return names[agentName] || agentName
   }
@@ -656,13 +701,33 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
 
   return (
     <div className="space-y-6">
-      {/* Header Info */}
-      {metadata && (
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="text-sm font-semibold text-blue-900 mb-1">Document</h3>
-          <p className="text-blue-800">{metadata.filename}</p>
+      {/* Header with Back to Editor and Generate Report Buttons */}
+      <div className="flex justify-between items-start gap-4">
+        {metadata && (
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex-1">
+            <h3 className="text-sm font-semibold text-blue-900 mb-1">Document</h3>
+            <p className="text-blue-800">{metadata.filename}</p>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <button
+            onClick={handleBackToEditor}
+            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 whitespace-nowrap"
+          >
+            ← Back to Editor
+          </button>
+          {checkId && (
+            <button
+              onClick={() => {
+                router.push(`/citation-checker/${fileId}/finalize-document?checkId=${checkId}`)
+              }}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 whitespace-nowrap"
+            >
+              Finalize Document
+            </button>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Legend */}
       <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
@@ -1145,13 +1210,107 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
                                   {tier3 && (
                                     <div className="pt-2 border-t border-gray-200">
                                       <h5 className="text-xs font-semibold text-gray-900 mb-2">Tier 3 Deep Review</h5>
-                                      <div className="p-3 bg-purple-50 rounded-md border border-purple-200">
-                                        <div className="text-xs text-gray-700">
-                                          {tier3.consensus?.reasoning || "Tier 3 review completed"}
+                                      <div className="p-3 bg-purple-50 rounded-md border border-purple-200 space-y-3">
+                                        {/* Consensus Summary */}
+                                        <div>
+                                          <div className="flex items-center gap-2 mb-2">
+                                            <span className={`px-2 py-1 text-xs font-semibold rounded ${
+                                              (() => {
+                                                const tier3Status = getTier3FinalStatus(tier3)
+                                                return tier3Status === "VALID" ? 'bg-green-100 text-green-800' :
+                                                       tier3Status === "FAIL" ? 'bg-red-100 text-red-800' :
+                                                       'bg-orange-100 text-orange-800'
+                                              })()
+                                            }`}>
+                                              {(() => {
+                                                const tier3Status = getTier3FinalStatus(tier3)
+                                                return tier3Status || 'UNKNOWN'
+                                              })()}
+                                            </span>
+                                            {tier3.consensus && (
+                                              <span className={`px-2 py-1 text-xs font-medium rounded ${
+                                                (tier3.consensus.confidence_score || 0) >= 0.8 ? 'bg-green-100 text-green-800' :
+                                                (tier3.consensus.confidence_score || 0) >= 0.5 ? 'bg-yellow-100 text-yellow-800' :
+                                                'bg-gray-100 text-gray-800'
+                                              }`}>
+                                                {formatConfidenceScore(tier3.consensus.confidence_score)}% Confidence
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="text-xs text-gray-700 whitespace-pre-wrap">
+                                            {tier3.consensus?.reasoning || tier3.reasoning || "Tier 3 review completed"}
+                                          </div>
+                                          {tier3.consensus && (
+                                            <div className="mt-2 text-xs text-gray-600">
+                                              Agreement: {tier3.consensus.agreement_level} ({formatConfidenceScore(tier3.consensus.confidence_score)}%)
+                                            </div>
+                                          )}
                                         </div>
-                                        {tier3.consensus && (
-                                          <div className="mt-2 text-xs text-gray-600">
-                                            Agreement: {tier3.consensus.agreement_level} ({formatConfidenceScore(tier3.consensus.confidence_score)}%)
+
+                                        {/* Tier 3 Panel Evaluation Details - Expandable */}
+                                        {tier3.panel_evaluation && tier3.panel_evaluation.length > 0 && (
+                                          <details className="mt-2">
+                                            <summary className="cursor-pointer text-xs font-semibold text-purple-900 hover:text-purple-700 mb-2">
+                                              Show Tier 3 Panel Details ({tier3.panel_evaluation.length} agents)
+                                            </summary>
+                                            <div className="mt-2 space-y-2 pt-2 border-t border-purple-200">
+                                              {tier3.panel_evaluation.map((agent: any, idx: number) => (
+                                                <div
+                                                  key={idx}
+                                                  className="p-2 border border-purple-200 rounded-md bg-white"
+                                                >
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className={`w-3 h-3 rounded-full ${
+                                                        agent.verdict === 'VALID' ? 'bg-green-500' :
+                                                        agent.verdict === 'INVALID' ? 'bg-red-500' :
+                                                        'bg-yellow-500'
+                                                      }`} />
+                                                      <span className="text-xs font-medium text-gray-900">
+                                                        {getTier3AgentDisplayName(agent.agent)}
+                                                      </span>
+                                                    </div>
+                                                    <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                                                      agent.verdict === 'VALID' ? 'bg-green-100 text-green-800' :
+                                                      agent.verdict === 'INVALID' ? 'bg-red-100 text-red-800' :
+                                                      'bg-yellow-100 text-yellow-800'
+                                                    }`}>
+                                                      {agent.verdict}
+                                                    </span>
+                                                  </div>
+                                                  {agent.reasoning && (
+                                                    <div className="mt-1 text-xs text-gray-600 whitespace-pre-wrap">
+                                                      <span className="font-medium">Reasoning: </span>
+                                                      <span>{agent.reasoning}</span>
+                                                    </div>
+                                                  )}
+                                                  {(agent.invalid_reason || agent.uncertain_reason) && (
+                                                    <div className="mt-1 text-xs text-gray-600">
+                                                      <span className="font-medium">Reason Code: </span>
+                                                      <span className="italic">{agent.invalid_reason || agent.uncertain_reason}</span>
+                                                    </div>
+                                                  )}
+                                                  <div className="mt-1 text-xs text-gray-500">
+                                                    Model: {agent.model} • {new Date(agent.timestamp).toLocaleString()}
+                                                  </div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </details>
+                                        )}
+
+                                        {/* Legacy fields display (if present and panel_evaluation not available) */}
+                                        {(!tier3.panel_evaluation || tier3.panel_evaluation.length === 0) && tier3.key_evidence && (
+                                          <div className="pt-2 border-t border-purple-200">
+                                            <div className="text-xs font-medium text-gray-700 mb-1">Key Evidence</div>
+                                            <p className="text-xs text-gray-700 whitespace-pre-wrap">{tier3.key_evidence}</p>
+                                          </div>
+                                        )}
+                                        
+                                        {(!tier3.panel_evaluation || tier3.panel_evaluation.length === 0) && tier3.remaining_uncertainties && (
+                                          <div className="pt-2 border-t border-purple-200">
+                                            <div className="text-xs font-medium text-gray-700 mb-1">Remaining Uncertainties</div>
+                                            <p className="text-xs text-gray-600 italic whitespace-pre-wrap">{tier3.remaining_uncertainties}</p>
                                           </div>
                                         )}
                                       </div>
@@ -1330,6 +1489,47 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
                 className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {savingEdit ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Back to Editor Warning Dialog */}
+      {showBackToEditorWarning && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Warning: Manual Reviews Will Be Lost
+            </h3>
+            <div className="mb-6">
+              <p className="text-gray-700 mb-2">
+                You have manual review decisions that will be lost if you edit the document:
+              </p>
+              <ul className="list-disc list-inside text-gray-600 space-y-1 mb-4">
+                {getManualReviewCount().approved > 0 && (
+                  <li>{getManualReviewCount().approved} approved citation(s)</li>
+                )}
+                {getManualReviewCount().questionable > 0 && (
+                  <li>{getManualReviewCount().questionable} questionable citation(s)</li>
+                )}
+              </ul>
+              <p className="text-gray-700">
+                Editing the document will require re-running citation validation, and your manual review decisions will need to be made again.
+              </p>
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setShowBackToEditorWarning(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmBackToEditor}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+              >
+                Continue Anyway
               </button>
             </div>
           </div>

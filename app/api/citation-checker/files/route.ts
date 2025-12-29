@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { uploadBlob } from "@/lib/blob"
+import { getAccessibleFilesWhere, getFileAccessLevel } from "@/lib/access-control"
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,9 +21,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // In test system: all files available to all users
+    // Filter files by access control - users see only their files and shared files
     // Exclude jsonData to improve performance - it's huge and not needed for the list view
     const files = await prisma.fileUpload.findMany({
+      where: getAccessibleFilesWhere(user.id, user.role),
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -34,6 +36,24 @@ export async function GET(request: NextRequest) {
         createdAt: true,
         updatedAt: true,
         userId: true,
+        caseId: true,
+        legalDocumentType: true,
+        filedByOrganization: true,
+        case: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            status: true,
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
         citationChecks: {
           orderBy: { version: "desc" },
           take: 1, // Get latest version for display
@@ -53,6 +73,15 @@ export async function GET(request: NextRequest) {
             identificationMethod: true,
             completedSteps: true,
             currentStep: true,
+            assignedToId: true,
+            assignedAt: true,
+            assignedTo: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
             // Explicitly exclude jsonData
           },
         },
@@ -61,6 +90,23 @@ export async function GET(request: NextRequest) {
             id: true,
             name: true,
             email: true,
+          },
+        },
+        shares: {
+          where: { sharedWithId: user.id },
+          select: {
+            id: true,
+            permission: true,
+            routedFromId: true,
+            routedAt: true,
+            createdAt: true,
+            sharedBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
           },
         },
       },
@@ -123,8 +169,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Combine files with their standard workflow checks
-    const filesWithStandardChecks = files.map((file) => {
+    // Combine files with their standard workflow checks and add access level
+    const filesWithStandardChecks = await Promise.all(files.map(async (file) => {
       const standardCheck = standardChecksMap.get(file.id) || null
 
       // Extract only the fields we need (jsonData is already excluded from query)
@@ -146,11 +192,15 @@ export async function GET(request: NextRequest) {
         currentStep: standardCheck.currentStep || null,
       } : null
 
+      // Get access level for this file
+      const accessLevel = await getFileAccessLevel(user.id, file.id)
+
       return {
         ...file,
         standardWorkflowCheck: standardCheckData, // Add the standard check separately
+        accessLevel, // Add access level indicator
       }
-    })
+    }))
 
     // Serialize Date objects and ensure proper JSON serialization
     const serializedFiles = filesWithStandardChecks.map((file: any) => ({
@@ -164,6 +214,9 @@ export async function GET(request: NextRequest) {
         status: check.status,
         createdAt: check.createdAt.toISOString(),
         updatedAt: check.updatedAt.toISOString(),
+        assignedToId: check.assignedToId || null,
+        assignedAt: check.assignedAt ? check.assignedAt.toISOString() : null,
+        assignedTo: check.assignedTo || null,
         // Include workflow fields (exclude jsonData for performance)
         workflowType: check.workflowType || null,
         workflowId: check.workflowId || null,
@@ -190,6 +243,14 @@ export async function GET(request: NextRequest) {
         identificationMethod: file.standardWorkflowCheck.identificationMethod || null,
         currentStep: file.standardWorkflowCheck.currentStep || null,
       } : null,
+      shares: (file.shares || []).map((share: any) => ({
+        id: share.id,
+        permission: share.permission,
+        routedFromId: share.routedFromId || null,
+        routedAt: share.routedAt ? share.routedAt.toISOString() : null,
+        createdAt: share.createdAt.toISOString(),
+        sharedBy: share.sharedBy,
+      })),
     }))
 
     return NextResponse.json(serializedFiles)
@@ -240,6 +301,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Get optional case assignment fields
+    const caseId = formData.get("caseId") as string | null
+    const legalDocumentType = formData.get("legalDocumentType") as string | null
+    const filedByOrganization = formData.get("filedByOrganization") as string | null
+
+    // Validate caseId if provided
+    if (caseId) {
+      const case_ = await prisma.case.findUnique({
+        where: { id: caseId },
+      })
+      if (!case_) {
+        return NextResponse.json({ error: "Case not found" }, { status: 404 })
+      }
+      // Check if user has access to the case
+      const { canAccessCase } = await import("@/lib/access-control")
+      const hasCaseAccess = await canAccessCase(user.id, caseId, "view")
+      if (!hasCaseAccess) {
+        return NextResponse.json(
+          { error: "You do not have access to this case" },
+          { status: 403 }
+        )
+      }
+    }
+
     // Upload to Vercel Blob Storage
     const buffer = await file.arrayBuffer()
     const blob = await uploadBlob(file.name, buffer, {
@@ -255,6 +340,9 @@ export async function POST(request: NextRequest) {
         fileSize: file.size,
         mimeType: file.type,
         blobUrl: blob.url,
+        caseId: caseId || null,
+        legalDocumentType: legalDocumentType?.trim() || null,
+        filedByOrganization: filedByOrganization?.trim() || null,
       },
     })
 

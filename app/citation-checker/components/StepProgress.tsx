@@ -9,27 +9,45 @@ interface StepProgressProps {
   fileId?: string | null
 }
 
-const steps: Array<{ id: WorkflowStep; title: string; path: string }> = [
-  { id: "upload", title: "Upload File", path: "/citation-checker" },
-  { id: "generate-json", title: "Generate JSON", path: "/citation-checker/[fileId]/generate-json" },
-  { id: "identify-citations", title: "Identify Citations", path: "/citation-checker/[fileId]/identify-citations" },
-  { id: "validate-citations", title: "Validate Citations", path: "/citation-checker/[fileId]/validate-citations" },
-  { id: "review-discrepancies", title: "Review Discrepancies", path: "/citation-checker/[fileId]/review-discrepancies" },
-  { id: "citations-report", title: "Citations Report", path: "/citation-checker/[fileId]/report" },
-  { id: "full-analysis", title: "Full Analysis", path: "/citation-checker/[fileId]/full-analysis" },
-  { id: "document-review", title: "Document Review", path: "/citation-checker/[fileId]/document-review" },
+// Simplified workflow steps - main user-facing steps
+const mainSteps: Array<{ id: WorkflowStep; title: string; path: string }> = [
+  { id: "upload", title: "Upload/Create Document", path: "/citation-checker" },
+  { id: "validate-citations", title: "Validate Citations", path: "/citation-checker/[fileId]/run-citation-checker" }, // Using validate-citations as the consolidated step ID
+  { id: "document-review", title: "Review Citations", path: "/citation-checker/[fileId]/document-review" },
+  { id: "finalize-document", title: "Finalize Document", path: "/citation-checker/[fileId]/finalize-document" },
+  { id: "citations-report", title: "Generate Report", path: "/citation-checker/[fileId]/report" },
 ]
 
+// Legacy steps for backward compatibility (mapped to main steps)
+const legacyStepMap: Record<WorkflowStep, WorkflowStep> = {
+  "upload": "upload",
+  "generate-json": "validate-citations", // Map to validate citations
+  "identify-citations": "validate-citations", // Map to validate citations
+  "validate-citations": "validate-citations",
+  "review-discrepancies": "document-review", // Map to document review
+  "finalize-document": "finalize-document",
+  "citations-report": "citations-report",
+  "full-analysis": "full-analysis",
+  "document-review": "document-review",
+}
+
+// Use main steps for display
+const steps = mainSteps
+
 export function StepProgress({ currentStep, completedSteps, fileId }: StepProgressProps) {
+  // Map legacy steps to main steps for display
+  const mappedCurrentStep = legacyStepMap[currentStep] || currentStep
+  
   const getStepPath = (step: WorkflowStep) => {
     if (step === "upload") return "/citation-checker"
     if (!fileId) return "#"
     const stepPathMap: Record<WorkflowStep, string> = {
       "upload": "/citation-checker",
-      "generate-json": `/citation-checker/${fileId}/generate-json`,
-      "identify-citations": `/citation-checker/${fileId}/identify-citations`,
-      "validate-citations": `/citation-checker/${fileId}/validate-citations`,
-      "review-discrepancies": `/citation-checker/${fileId}/review-discrepancies`,
+      "generate-json": `/citation-checker/${fileId}/run-citation-checker`, // Redirect to unified page
+      "identify-citations": `/citation-checker/${fileId}/run-citation-checker`, // Redirect to unified page
+      "validate-citations": `/citation-checker/${fileId}/run-citation-checker`, // Unified pipeline page
+      "review-discrepancies": `/citation-checker/${fileId}/document-review`, // Map to document review
+      "finalize-document": `/citation-checker/${fileId}/finalize-document`,
       "citations-report": `/citation-checker/${fileId}/report`,
       "full-analysis": `/citation-checker/${fileId}/full-analysis`,
       "document-review": `/citation-checker/${fileId}/document-review`,
@@ -37,8 +55,19 @@ export function StepProgress({ currentStep, completedSteps, fileId }: StepProgre
     return stepPathMap[step] || "#"
   }
 
-  // Find current step index
-  const currentIndex = steps.findIndex(step => step.id === currentStep)
+  // Map completed steps to main steps
+  const mappedCompletedSteps = new Set<WorkflowStep>()
+  completedSteps.forEach(step => {
+    const mapped = legacyStepMap[step] || step
+    mappedCompletedSteps.add(mapped)
+    // Also mark legacy steps as completed if their mapped step is completed
+    if (mapped !== step) {
+      mappedCompletedSteps.add(step)
+    }
+  })
+
+  // Find current step index (use mapped step)
+  const currentIndex = steps.findIndex(step => step.id === mappedCurrentStep)
   
   // Calculate visible range: show 3 before, current, and 3 after
   const beforeCount = 3
@@ -51,10 +80,13 @@ export function StepProgress({ currentStep, completedSteps, fileId }: StepProgre
   const hasStepsAfter = endIndex < steps.length - 1
 
   const renderStep = (step: { id: WorkflowStep; title: string; path: string }, index: number, globalIndex: number) => {
-    const isActive = step.id === currentStep
-    const isCompleted = completedSteps.has(step.id)
-    const isAccessible = globalIndex === 0 || completedSteps.has(steps[globalIndex - 1].id)
+    const isActive = step.id === mappedCurrentStep
+    const isCompleted = mappedCompletedSteps.has(step.id)
+    const isAccessible = globalIndex === 0 || mappedCompletedSteps.has(steps[globalIndex - 1].id)
     const stepPath = getStepPath(step.id)
+    
+    // Step number is based on position in mainSteps array (1-indexed)
+    const stepNumber = globalIndex + 1
 
     const stepContent = (
       <div className="flex flex-col items-center flex-1 min-w-0">
@@ -69,7 +101,7 @@ export function StepProgress({ currentStep, completedSteps, fileId }: StepProgre
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          {isCompleted ? "✓" : globalIndex + 1}
+          {isCompleted ? "✓" : stepNumber}
         </div>
         <div className="text-center">
           <div

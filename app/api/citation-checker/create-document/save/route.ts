@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { documentText, filename } = body
+    const { documentText, filename, fileId, caseId, legalDocumentType, filedByOrganization } = body
 
     if (!documentText || typeof documentText !== 'string') {
       return NextResponse.json(
@@ -30,8 +30,121 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // If fileId is provided, update existing document
+    if (fileId) {
+      const existingFile = await prisma.fileUpload.findUnique({
+        where: { id: fileId },
+        include: { user: true },
+      })
+
+      if (!existingFile) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 })
+      }
+
+      // Check if user has permission (owner or has access)
+      if (existingFile.userId !== user.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+      }
+
+      // Check if document has already entered citation workflow (has jsonData)
+      const latestCheck = await prisma.citationCheck.findFirst({
+        where: { fileUploadId: fileId },
+        orderBy: { version: 'desc' },
+      })
+
+      if (latestCheck?.jsonData) {
+        return NextResponse.json(
+          { error: "Cannot edit document that has already entered citation workflow" },
+          { status: 400 }
+        )
+      }
+
+      // Convert text to ArrayBuffer for blob storage
+      const textBuffer = Buffer.from(documentText, 'utf-8')
+      const arrayBuffer = textBuffer.buffer.slice(textBuffer.byteOffset, textBuffer.byteOffset + textBuffer.byteLength)
+
+      // Upload new version to blob storage
+      // Use existing filename for blob storage, but update originalName if new name provided
+      const blobFilename = existingFile.originalName
+      const blob = await uploadBlob(blobFilename, arrayBuffer, {
+        contentType: 'text/plain',
+      })
+
+      // Update file metadata - only update originalName if a new name was provided
+      const updateData: any = {
+        filename: blob.pathname,
+        fileSize: textBuffer.length,
+        blobUrl: blob.url,
+        updatedAt: new Date(),
+      }
+      
+      if (filename && filename.trim().length > 0) {
+        updateData.originalName = filename.trim()
+      }
+      
+      // Handle case assignment fields if provided
+      if (caseId !== undefined) {
+        if (caseId) {
+          // Validate case exists and user has access
+          const case_ = await prisma.case.findUnique({
+            where: { id: caseId },
+          })
+          if (!case_) {
+            return NextResponse.json({ error: "Case not found" }, { status: 404 })
+          }
+          const { canAccessCase } = await import("@/lib/access-control")
+          const hasCaseAccess = await canAccessCase(user.id, caseId, "view")
+          if (!hasCaseAccess) {
+            return NextResponse.json(
+              { error: "You do not have access to this case" },
+              { status: 403 }
+            )
+          }
+        }
+        updateData.caseId = caseId || null
+      }
+      if (legalDocumentType !== undefined) {
+        updateData.legalDocumentType = legalDocumentType?.trim() || null
+      }
+      if (filedByOrganization !== undefined) {
+        updateData.filedByOrganization = filedByOrganization?.trim() || null
+      }
+
+      const updatedFile = await prisma.fileUpload.update({
+        where: { id: fileId },
+        data: updateData,
+      })
+
+      return NextResponse.json({
+        fileUpload: {
+          ...updatedFile,
+          createdAt: updatedFile.createdAt.toISOString(),
+          updatedAt: updatedFile.updatedAt.toISOString(),
+        },
+      })
+    }
+
+    // Create new document
     // Generate filename if not provided
     const finalFilename = filename || `ai-generated-document-${new Date().toISOString().split('T')[0]}.txt`
+
+    // Validate caseId if provided
+    if (caseId) {
+      const case_ = await prisma.case.findUnique({
+        where: { id: caseId },
+      })
+      if (!case_) {
+        return NextResponse.json({ error: "Case not found" }, { status: 404 })
+      }
+      const { canAccessCase } = await import("@/lib/access-control")
+      const hasCaseAccess = await canAccessCase(user.id, caseId, "view")
+      if (!hasCaseAccess) {
+        return NextResponse.json(
+          { error: "You do not have access to this case" },
+          { status: 403 }
+        )
+      }
+    }
 
     // Convert text to ArrayBuffer for blob storage
     const textBuffer = Buffer.from(documentText, 'utf-8')
@@ -51,6 +164,9 @@ export async function POST(request: NextRequest) {
         fileSize: textBuffer.length,
         mimeType: 'text/plain',
         blobUrl: blob.url,
+        caseId: caseId || null,
+        legalDocumentType: legalDocumentType?.trim() || null,
+        filedByOrganization: filedByOrganization?.trim() || null,
       },
     })
 

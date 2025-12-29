@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { generateDocument, ChatMessage } from "@/lib/ai/document-generation"
-import { ANTHROPIC_API_KEY } from "@/lib/env"
+import { ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY } from "@/lib/env"
+
+type Provider = "anthropic" | "openai" | "gemini" | "grok"
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,15 +14,57 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    if (!ANTHROPIC_API_KEY) {
+    const body = await request.json()
+    const { 
+      message, 
+      conversationHistory = [], 
+      currentDocument = null, 
+      systemPrompt, 
+      mode = "edit",
+      provider = "anthropic",
+      model
+    } = body
+
+    // Get API key based on provider
+    let apiKey: string
+    if (provider === "anthropic") {
+      apiKey = ANTHROPIC_API_KEY
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "ANTHROPIC_API_KEY not configured" },
+          { status: 500 }
+        )
+      }
+    } else if (provider === "openai") {
+      apiKey = OPENAI_API_KEY
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "OPENAI_API_KEY not configured" },
+          { status: 500 }
+        )
+      }
+    } else if (provider === "grok") {
+      apiKey = GROK_API_KEY
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "GROK_API_KEY not configured" },
+          { status: 500 }
+        )
+      }
+    } else if (provider === "gemini") {
+      apiKey = GEMINI_API_KEY
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "GEMINI_API_KEY not configured" },
+          { status: 500 }
+        )
+      }
+    } else {
       return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY not configured" },
-        { status: 500 }
+        { error: `Unsupported provider: ${provider}` },
+        { status: 400 }
       )
     }
-
-    const body = await request.json()
-    const { message, conversationHistory = [], currentDocument = null, systemPrompt, mode = "edit" } = body
 
     if (!message || typeof message !== 'string') {
       return NextResponse.json(
@@ -49,7 +93,9 @@ export async function POST(request: NextRequest) {
       history,
       currentDocument || null,
       {
-        apiKey: ANTHROPIC_API_KEY,
+        apiKey,
+        provider: provider as Provider,
+        model: model || undefined,
         systemPrompt: systemPrompt || undefined,
         mode: mode as "ask" | "edit",
       }
@@ -57,6 +103,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       response: result.response,
+      parsedResponse: result.parsedResponse,
       tokenUsage: result.tokenUsage,
     })
   } catch (error) {

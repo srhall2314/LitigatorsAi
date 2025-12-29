@@ -24,26 +24,26 @@ export default async function ReviewDiscrepanciesPageRoute({
         <div className="max-w-5xl mx-auto">
           <div className="mb-8">
             <h1 className="text-4xl font-normal text-black mb-4">
-              Citation Checker Workflow
+              Document Workflow
             </h1>
             <p className="text-black text-lg">
-              Step-by-step citation validation process
+              Review citation discrepancies
             </p>
           </div>
 
           <StepProgress 
             currentStep="review-discrepancies" 
-            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations"])}
+            completedSteps={new Set(["upload", "validate-citations"])}
             fileId={params.fileId}
           />
 
           <div className="border border-gray-200 rounded-lg p-8 bg-white">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black mb-2">
-                Step 5: Review Discrepancies
+                Review Discrepancies
               </h2>
               <p className="text-black text-gray-600">
-                Review and address any citation discrepancies
+                Review and address any citation discrepancies (This step is now part of Document Review)
               </p>
             </div>
             <ReviewDiscrepanciesPage fileId={params.fileId} />

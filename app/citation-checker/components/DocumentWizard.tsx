@@ -108,12 +108,23 @@ export function DocumentWizard({ onGenerate, onSkip }: DocumentWizardProps) {
   return (
     <div className="border border-gray-200 rounded-lg bg-white p-8 max-w-3xl mx-auto">
       <div className="mb-6">
-        <h2 className="text-2xl font-semibold text-black mb-2">
-          Document Creation Wizard
-        </h2>
-        <p className="text-gray-600">
-          Fill in the information below to generate your initial document draft
-        </p>
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-black mb-2">
+              Document Creation Wizard
+            </h2>
+            <p className="text-gray-600">
+              Fill in the information below to generate your initial document draft
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onSkip}
+            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 whitespace-nowrap"
+          >
+            Skip Wizard
+          </button>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -315,13 +326,6 @@ export function DocumentWizard({ onGenerate, onSkip }: DocumentWizardProps) {
             className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 font-medium"
           >
             Generate Document Draft
-          </button>
-          <button
-            type="button"
-            onClick={onSkip}
-            className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-          >
-            Skip Wizard
           </button>
         </div>
       </form>

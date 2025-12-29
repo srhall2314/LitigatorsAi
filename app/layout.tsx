@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 
 export const metadata: Metadata = {
-  title: "LitAI",
-  description: "Next.js app with Neon, Prisma, and Vercel Blob Storage",
+  title: "LitigatorsAI",
+  description: "Legal document management system with AI-powered citation validation and document review",
 };
 
 export default function RootLayout({

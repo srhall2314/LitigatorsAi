@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { parseWordDocument, parseTextDocument } from "@/lib/document-parser"
+import { canModifyWorkflow } from "@/lib/access-control"
 
 export async function POST(
   request: NextRequest,
@@ -45,8 +46,23 @@ export async function POST(
       )
     }
 
-    // Check if JSON already exists
+    // Check if user can modify workflow
     const latestCheck = fileUpload.citationChecks[0]
+    if (latestCheck) {
+      const canModify = await canModifyWorkflow(user.id, latestCheck.id)
+      if (!canModify) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+    } else {
+      // Check file access for new check creation
+      const { canAccessFile } = await import("@/lib/access-control")
+      const hasAccess = await canAccessFile(user.id, fileId, 'edit')
+      if (!hasAccess) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+    }
+
+    // Check if JSON already exists
     const hasJson = latestCheck && latestCheck.jsonData
     
     // Check for force regeneration parameter

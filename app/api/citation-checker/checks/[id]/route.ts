@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { canAccessFile, canModifyWorkflow } from "@/lib/access-control"
 
 export async function GET(
   request: NextRequest,
@@ -37,11 +38,24 @@ export async function GET(
             },
           },
         },
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
     })
 
     if (!citationCheck) {
       return NextResponse.json({ error: "Not found" }, { status: 404 })
+    }
+
+    // Check access to the file
+    const hasAccess = await canAccessFile(user.id, citationCheck.fileUploadId, 'view')
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     return NextResponse.json(citationCheck)
@@ -80,6 +94,12 @@ export async function PATCH(
 
     if (!citationCheck) {
       return NextResponse.json({ error: "Not found" }, { status: 404 })
+    }
+
+    // Check if user can modify workflow
+    const canModify = await canModifyWorkflow(user.id, id)
+    if (!canModify) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     const body = await request.json()

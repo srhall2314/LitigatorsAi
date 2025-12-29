@@ -27,6 +27,19 @@ model User {
   sessions      Session[]
   fileUploads   FileUpload[]
   citationChecks CitationCheck[]
+  
+  // Document sharing relations
+  sharedDocuments    DocumentShare[] @relation("SharedWith")
+  sharedByMe         DocumentShare[] @relation("SharedBy")
+  routedFromMe       DocumentShare[] @relation("RoutedFrom")
+  assignedChecks     CitationCheck[] @relation("AssignedChecks")
+  savedPrompts       SavedPrompt[]
+  
+  // Case relations
+  ownedCases         Case[]         @relation("CaseOwner")
+  caseMemberships    CaseMember[]   @relation("CaseMembers")
+  addedCaseMembers   CaseMember[]   @relation("CaseMemberAddedBy")
+  addedInfoDocuments CaseInfoDocument[]
 }
 
 model Account {
@@ -75,10 +88,19 @@ model FileUpload {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
+  // Case assignment fields (optional for backward compatibility)
+  caseId              String?  // Optional foreign key to Case
+  legalDocumentType   String?  // "motion" | "brief" | "memo" | "pleading" | "complaint" | "answer" | etc.
+  filedByOrganization String?  // Organization that filed the document
+  
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case        Case?    @relation(fields: [caseId], references: [id], onDelete: SetNull)
   citationChecks CitationCheck[]
+  shares      DocumentShare[]
   
   @@index([userId])
+  @@index([caseId])
+  @@index([legalDocumentType])
 }
 
 model CitationCheck {
@@ -86,7 +108,7 @@ model CitationCheck {
   fileUploadId  String
   userId        String
   version       Int      @default(1)
-  status        String   @default("uploaded") // uploaded, json_generated, citations_identified, citations_validated, discrepancies_reviewed, report_generated
+  status        String   @default("uploaded") // uploaded, json_generated, citations_identified, citations_validated, discrepancies_reviewed, finalized, report_generated
   jsonData      Json?    @db.JsonB // Complete document structure with citations, validation results, and metadata - format TBD by parser
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -106,8 +128,13 @@ model CitationCheck {
   completedSteps    String[]  @default([]) // Array of completed step IDs
   currentStep       String?   // Current active step
   
+  // NEW: Assignment tracking for soft routing
+  assignedToId  String?  // User currently working on this check
+  assignedAt    DateTime?
+  
   fileUpload    FileUpload @relation(fields: [fileUploadId], references: [id], onDelete: Cascade)
   user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo    User?      @relation("AssignedChecks", fields: [assignedToId], references: [id], onDelete: SetNull)
   validationJob ValidationJob?
   
   @@unique([fileUploadId, version])
@@ -115,6 +142,7 @@ model CitationCheck {
   @@index([fileUploadId])
   @@index([workflowType, workflowId]) // For querying workflow groups
   @@index([workflowType]) // For filtering by workflow type
+  @@index([assignedToId]) // For querying assigned checks
 }
 
 model ValidationJob {
@@ -155,5 +183,99 @@ model ValidationQueueItem {
   @@unique([jobId, citationId, tier])
   @@index([jobId, status])
   @@index([status])
+}
+
+model DocumentShare {
+  id            String   @id @default(uuid())
+  fileUploadId  String
+  sharedWithId  String   // User who receives access
+  sharedById    String   // User who shared (owner)
+  permission    String   @default("view") // "view" | "edit" | "route"
+  routedFromId  String?  // If routed, track original owner
+  routedAt      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  fileUpload    FileUpload @relation(fields: [fileUploadId], references: [id], onDelete: Cascade)
+  sharedWith    User       @relation("SharedWith", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  sharedBy      User       @relation("SharedBy", fields: [sharedById], references: [id], onDelete: Cascade)
+  routedFrom    User?      @relation("RoutedFrom", fields: [routedFromId], references: [id], onDelete: SetNull)
+  
+  @@unique([fileUploadId, sharedWithId]) // One share record per file-user pair
+  @@index([fileUploadId])
+  @@index([sharedWithId])
+  @@index([sharedById])
+  @@index([routedFromId])
+}
+
+model SavedPrompt {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  prompt      String   @db.Text
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+}
+
+model Case {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  status      String?  @default("active") // "active" | "closed" | "archived"
+  metadata    Json?    @db.JsonB // Flexible metadata storage
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  owner       User     @relation("CaseOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  documents   FileUpload[]
+  members     CaseMember[]
+  infoDocuments CaseInfoDocument[]
+  
+  @@index([ownerId])
+  @@index([status])
+}
+
+model CaseMember {
+  id          String   @id @default(uuid())
+  caseId      String
+  userId      String
+  role        String   @default("member") // "owner" | "editor" | "viewer" | "member"
+  addedAt     DateTime @default(now())
+  addedById   String?
+  
+  case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user        User     @relation("CaseMembers", fields: [userId], references: [id], onDelete: Cascade)
+  addedBy     User?    @relation("CaseMemberAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  
+  @@unique([caseId, userId])
+  @@index([caseId])
+  @@index([userId])
+}
+
+// Future: CaseInfoDocument model (for informational documents not in system)
+model CaseInfoDocument {
+  id          String   @id @default(uuid())
+  caseId      String
+  name        String
+  description String?
+  source      String?  // "external" | "url" | "reference"
+  url         String?
+  reference   String?
+  documentType String?
+  metadata    Json?    @db.JsonB
+  addedById   String
+  addedAt     DateTime @default(now())
+  
+  case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  addedBy     User     @relation(fields: [addedById], references: [id], onDelete: Cascade)
+  
+  @@index([caseId])
+  @@index([addedById])
 }
 

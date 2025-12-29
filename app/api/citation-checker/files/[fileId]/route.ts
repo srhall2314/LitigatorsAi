@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { deleteBlob } from "@/lib/blob"
+import { canAccessFile } from "@/lib/access-control"
 
 export async function DELETE(
   request: NextRequest,
@@ -36,9 +37,11 @@ export async function DELETE(
       return NextResponse.json({ error: "File not found" }, { status: 404 })
     }
 
-    // Check if user owns the file (or is admin)
-    // In test system: allow deletion if user exists
-    // For production, you might want: if (fileUpload.userId !== user.id && user.role !== 'admin')
+    // Check if user has route permission (owner or admin can delete)
+    const hasAccess = await canAccessFile(user.id, fileId, 'route')
+    if (!hasAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
     
     // Delete the blob from Vercel Blob Storage if URL exists
     if (fileUpload.blobUrl) {

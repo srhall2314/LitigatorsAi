@@ -12,6 +12,14 @@ export default async function HeavyAnalysisLandingPage() {
     redirect("/auth/signin")
   }
 
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+  })
+
+  if (user?.role !== "admin") {
+    redirect("/dashboard")
+  }
+
   // Get all files with JSON generated
   const files = await prisma.fileUpload.findMany({
     where: {

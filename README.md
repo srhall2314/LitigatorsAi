@@ -1,6 +1,6 @@
-# LitAI - Citation Checker
+# LitigatorsAI
 
-**The hallucination detector for legal AI.** A comprehensive post-drafting review tool that programmatically extracts citations from legal documents, validates them through a multi-tier verification system, and flags suspicious citations for lawyer review.
+**Legal document management system with AI-powered citation validation.** A comprehensive platform for managing legal documents, creating and editing documents with AI assistance, and validating citations through a sophisticated multi-tier verification system.
 
 ## Table of Contents
 
@@ -24,15 +24,17 @@ AI-generated legal content (briefs, motions, memoranda) frequently contains hall
 
 ### Solution
 
-Citation Checker is a post-drafting review tool that:
-1. Extracts citations from legal documents (Word format)
-2. Validates citations through a sophisticated three-tier verification system
-3. Flags suspicious citations with detailed analysis for lawyer review
-4. Provides comprehensive reports and structured data output
+LitigatorsAI is a comprehensive legal document management system that:
+1. Enables AI-powered document creation and editing
+2. Manages legal documents and organizes them by case
+3. Extracts citations from legal documents (Word format)
+4. Validates citations through a sophisticated three-tier verification system
+5. Flags suspicious citations with detailed analysis for lawyer review
+6. Provides comprehensive reports and structured data output
 
 ### Positioning
 
-**The hallucination detector for legal AI.** Solves the core trust problem with AI-assisted legal drafting by providing systematic citation verification.
+**Legal document management with AI-powered citation validation.** A full-featured platform that combines document management, AI-assisted drafting, and systematic citation verification to solve the core trust problem with AI-assisted legal work.
 
 ---
 
@@ -174,10 +176,11 @@ npm run db:seed
 
 ### Step-by-Step Process
 
-1. **Upload File** (`/citation-checker`)
-   - User uploads Word document (.doc, .docx)
+1. **Upload or Create Document** (`/citation-checker`)
+   - User uploads Word document (.doc, .docx) or creates new document with AI
    - File stored in Vercel Blob Storage
    - `FileUpload` and `CitationCheck` records created
+   - Documents can be organized by case
 
 2. **Generate JSON** (`/citation-checker/[fileId]/generate-json`)
    - Document parsed using Mammoth
@@ -196,18 +199,23 @@ npm run db:seed
    - Each citation processed through three-tier validation
    - Progress tracked via `ValidationJob` and `ValidationQueueItem`
 
-5. **Review Discrepancies** (`/citation-checker/[fileId]/review-discrepancies`)
-   - User reviews flagged citations
-   - Detailed analysis from Tier 3 available
+5. **Review Document** (`/citation-checker/[fileId]/document-review`)
+   - User reviews document by paragraph
+   - Reviews flagged citations with detailed analysis
+   - Manual review decisions tracked
 
-6. **Citations Report** (`/citation-checker/[fileId]/report`)
+6. **Finalize Document** (`/citation-checker/[fileId]/finalize-document`)
+   - Complete document review process
+   - Enable report generation
+
+7. **Citations Report** (`/citation-checker/[fileId]/report`)
    - Final validation report
    - Summary statistics
    - Export capabilities
 
 ### Workflow Component
 
-The main workflow is managed by `CitationCheckerWorkflow.tsx`, which provides:
+The main workflow is managed by `CitationCheckerWorkflow.tsx` and the step progress component, which provide:
 - Step-by-step navigation
 - Progress tracking
 - State management
@@ -316,6 +324,9 @@ The main workflow is managed by `CitationCheckerWorkflow.tsx`, which provides:
 
 ### Core Features
 
+- **Document Management**: Upload, create, and organize legal documents
+- **AI Document Creation**: Create and edit legal documents with AI assistance
+- **Case Organization**: Organize documents by case with team collaboration
 - **Document Upload**: Word document (.doc, .docx) upload and storage
 - **JSON Generation**: Structured document representation
 - **Citation Identification**: 
@@ -323,6 +334,7 @@ The main workflow is managed by `CitationCheckerWorkflow.tsx`, which provides:
   - Eyecite library integration
 - **Multi-Tier Validation**: Three-tier validation system
 - **Queue-Based Processing**: Asynchronous validation with progress tracking
+- **Document Review**: Paragraph-by-paragraph review with citation analysis
 - **Heavy Analysis**: Full-document analysis with multiple model providers
 - **Test Runs**: Comparative analysis across multiple validation runs
 - **Validation Runs**: Track and compare validation history

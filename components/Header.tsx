@@ -18,6 +18,18 @@ export function Header() {
           <nav className="flex items-center space-x-4">
             {session?.user ? (
               <>
+                <Link
+                  href="/citation-checker"
+                  className="text-black hover:underline"
+                >
+                  Files
+                </Link>
+                <Link
+                  href="/citation-checker/cases"
+                  className="text-black hover:underline"
+                >
+                  Cases
+                </Link>
                 {session.user.role === "admin" && (
                   <Link
                     href="/admin"

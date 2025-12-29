@@ -23,6 +23,11 @@ interface CitationWithValidation {
   extractedComponents?: any
   paragraphId?: string
   paragraphText?: string
+  manualReview?: {
+    status: "approved" | "questionable"
+    notes?: string
+    reviewedBy?: string
+  }
 }
 
 interface DocumentMetadata {
@@ -290,11 +295,52 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
     }
   }
 
+  // Get final status for a citation, prioritizing manual review over AI validation
+  const getFinalStatus = (citation: CitationWithValidation): {
+    status: "APPROVED" | "QUESTIONABLE" | "LOW_RISK" | "MODERATE_RISK" | "NEEDS_ADDITIONAL_REVIEW" | "UNKNOWN"
+    source: "manual" | "ai"
+  } => {
+    // Manual review takes precedence
+    if (citation.manualReview?.status === "approved") {
+      return { status: "APPROVED", source: "manual" }
+    }
+    if (citation.manualReview?.status === "questionable") {
+      return { status: "QUESTIONABLE", source: "manual" }
+    }
+    
+    // Fall back to AI validation
+    const riskLevel = getCitationRiskLevel(citation as any)
+    return { status: riskLevel || "UNKNOWN", source: "ai" }
+  }
+
   // Filter citations that have validation results
   const citationsWithValidation = citations.filter(c => c.validation)
 
-  // Calculate statistics using risk-based utility function
-  const { lowRisk, moderateRisk, needsReview, total: validatedTotal } = calculateRiskStatistics(citations)
+  // Calculate statistics using risk-based utility function, but prioritize manual reviews
+  const calculateStatisticsWithManualReviews = () => {
+    let approved = 0
+    let questionable = 0
+    let lowRisk = 0
+    let moderateRisk = 0
+    let needsReview = 0
+    
+    citations.forEach(citation => {
+      const finalStatus = getFinalStatus(citation)
+      if (finalStatus.source === "manual") {
+        if (finalStatus.status === "APPROVED") approved++
+        else if (finalStatus.status === "QUESTIONABLE") questionable++
+      } else {
+        if (finalStatus.status === "LOW_RISK") lowRisk++
+        else if (finalStatus.status === "MODERATE_RISK") moderateRisk++
+        else if (finalStatus.status === "NEEDS_ADDITIONAL_REVIEW") needsReview++
+      }
+    })
+    
+    return { approved, questionable, lowRisk, moderateRisk, needsReview, total: citations.length }
+  }
+  
+  const stats = calculateStatisticsWithManualReviews()
+  const { lowRisk, moderateRisk, needsReview, total: validatedTotal } = stats
   
   // Verify the sum matches validatedTotal (for debugging)
   const sumOfRisks = lowRisk + moderateRisk + needsReview
@@ -622,6 +668,84 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
       addText(summaryText, 10)
       yPosition += sectionSpacing * 2
 
+      // Citation Summary by Paragraph
+      if (citationsByParagraph.size > 0) {
+        addText('Citation Summary by Paragraph', 14, true)
+        yPosition += sectionSpacing
+        
+        // Helper to get status text and color for a citation
+        const getCitationStatus = (citation: CitationWithValidation) => {
+          if (citation.tier_3) {
+            const tier3Status = getTier3FinalStatus(citation.tier_3)
+            if (tier3Status === "VALID") {
+              return { text: 'VALID (T3)', color: [34, 197, 94] as [number, number, number] }
+            } else if (tier3Status === "FAIL") {
+              return { text: 'INVALID (T3)', color: [239, 68, 68] as [number, number, number] }
+            } else {
+              return { text: 'UNCERTAIN (T3)', color: [234, 179, 8] as [number, number, number] }
+            }
+          } else if (citation.validation) {
+            const recommendation = citation.validation.consensus.recommendation
+            if (recommendation === "CITATION_LIKELY_VALID") {
+              return { text: 'VALID', color: [34, 197, 94] as [number, number, number] }
+            } else if (recommendation === "CITATION_LIKELY_HALLUCINATED") {
+              return { text: 'INVALID', color: [239, 68, 68] as [number, number, number] }
+            } else {
+              return { text: 'UNCERTAIN', color: [234, 179, 8] as [number, number, number] }
+            }
+          }
+          return { text: 'N/A', color: [128, 128, 128] as [number, number, number] }
+        }
+
+        // Group and display citations by paragraph
+        Array.from(citationsByParagraph.entries()).forEach(([paragraphId, paraCitations]) => {
+          paraCitations.forEach((citation) => {
+            checkNewPage(15) // Reserve space for each citation row
+            
+            const status = getCitationStatus(citation)
+            const citationText = citation.citationText.length > 80 
+              ? citation.citationText.substring(0, 77) + '...' 
+              : citation.citationText
+            
+            // Paragraph ID
+            pdf.setFontSize(9)
+            pdf.setFont('helvetica', 'bold')
+            pdf.setTextColor(100, 100, 100)
+            pdf.text(paragraphId, margin, yPosition)
+            
+            // Status
+            pdf.setFontSize(9)
+            pdf.setFont('helvetica', 'bold')
+            pdf.setTextColor(status.color[0], status.color[1], status.color[2])
+            const statusX = margin + 25
+            pdf.text(status.text, statusX, yPosition)
+            
+            // Citation text
+            pdf.setFontSize(9)
+            pdf.setFont('helvetica', 'normal')
+            pdf.setTextColor(0, 0, 0)
+            const citationX = statusX + 35
+            const citationWidth = pageWidth - (citationX - margin)
+            const citationLines = pdf.splitTextToSize(citationText, citationWidth)
+            citationLines.forEach((line: string, idx: number) => {
+              if (idx === 0) {
+                pdf.text(line, citationX, yPosition)
+              } else {
+                yPosition += 4
+                checkNewPage(5)
+                pdf.text(line, citationX, yPosition)
+              }
+            })
+            
+            yPosition += 5
+          })
+        })
+        
+        yPosition += sectionSpacing
+        addHorizontalLine()
+        yPosition += sectionSpacing
+      }
+
       // Citation Details
       addText('Citation Details', 14, true)
       yPosition += sectionSpacing
@@ -809,12 +933,6 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
         >
           Print Report
         </button>
-        <Link
-          href={`/citation-checker/${fileId}/full-analysis${checkId ? `?checkId=${checkId}` : ''}`}
-          className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-        >
-          Continue to Full Analysis →
-        </Link>
         <button
           onClick={() => window.location.href = `/citation-checker`}
           className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
@@ -1192,8 +1310,30 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                               {citation.citationType?.toUpperCase() || 'UNKNOWN'}
                             </span>
                             
-                            {/* Show Tier 3 risk level if it exists and overrides Tier 2 */}
-                            {citation.tier_3 && (() => {
+                            {/* Show Manual Review Status First (takes priority) */}
+                            {citation.manualReview?.status === "approved" && (
+                              <>
+                                <span className="px-3 py-1 text-sm font-semibold rounded bg-blue-100 text-blue-800 border-2 border-blue-300">
+                                  ✓ APPROVED (Manual Review)
+                                </span>
+                                <span className="px-2 py-1 text-xs font-medium rounded bg-blue-50 text-blue-700">
+                                  Manually Approved
+                                </span>
+                              </>
+                            )}
+                            {citation.manualReview?.status === "questionable" && (
+                              <>
+                                <span className="px-3 py-1 text-sm font-semibold rounded bg-purple-100 text-purple-800 border-2 border-purple-300">
+                                  ? QUESTIONABLE (Manual Review)
+                                </span>
+                                <span className="px-2 py-1 text-xs font-medium rounded bg-purple-50 text-purple-700">
+                                  Marked as Questionable
+                                </span>
+                              </>
+                            )}
+                            
+                            {/* Show Tier 3 risk level if it exists and overrides Tier 2 (only if no manual review) */}
+                            {!citation.manualReview && citation.tier_3 && (() => {
                               const tier3Consensus = citation.tier_3?.consensus
                               const isNewFormatT3 = isNewFormatTier3Result(citation.tier_3)
                               
@@ -1299,6 +1439,39 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                             )}
                           </div>
                           <p className="text-base font-medium text-gray-900 mb-3">{citation.citationText}</p>
+                          
+                          {/* Manual Review Section */}
+                          {citation.manualReview && (
+                            <div className={`mb-4 p-4 border-2 rounded-lg ${
+                              citation.manualReview.status === "approved" 
+                                ? "bg-blue-50 border-blue-200" 
+                                : "bg-purple-50 border-purple-200"
+                            }`}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={`px-2 py-1 text-xs font-semibold rounded ${
+                                  citation.manualReview.status === "approved"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : "bg-purple-100 text-purple-800"
+                                }`}>
+                                  {citation.manualReview.status === "approved" ? "✓ APPROVED" : "? QUESTIONABLE"}
+                                </span>
+                                <span className="text-sm font-medium text-gray-700">
+                                  Manual Review
+                                </span>
+                              </div>
+                              {citation.manualReview.notes && (
+                                <p className="text-sm text-gray-700 mt-2">
+                                  <span className="font-medium">Notes: </span>
+                                  {citation.manualReview.notes}
+                                </p>
+                              )}
+                              {citation.manualReview.reviewedBy && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                  Reviewed by: {citation.manualReview.reviewedBy}
+                                </p>
+                              )}
+                            </div>
+                          )}
                           
                           {/* Related JSON */}
                           <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-md overflow-hidden">

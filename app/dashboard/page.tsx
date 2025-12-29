@@ -30,11 +30,41 @@ export default async function DashboardPage() {
               Welcome, {user.name || user.email}
             </h1>
             <p className="text-black text-lg">
-              You are successfully logged in to LitigatorsAI
+              Dashboard - LitigatorsAI
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-black mb-2">
+                Files
+              </h2>
+              <p className="text-black mb-4">
+                View and manage your documents
+              </p>
+              <a
+                href="/citation-checker"
+                className="text-black underline hover:no-underline inline-block"
+              >
+                Go to Files →
+              </a>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-black mb-2">
+                Cases
+              </h2>
+              <p className="text-black mb-4">
+                Organize documents by case
+              </p>
+              <a
+                href="/citation-checker/cases"
+                className="text-black underline hover:no-underline inline-block"
+              >
+                Go to Cases →
+              </a>
+            </div>
+
             <div className="border border-gray-200 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-black mb-2">
                 Your Account
@@ -64,80 +94,69 @@ export default async function DashboardPage() {
               </div>
             )}
 
-            <div className="border border-gray-200 rounded-lg p-6">
-              <h2 className="text-xl font-semibold text-black mb-2">
-                Citation Checker Workflow
-              </h2>
-              <p className="text-black mb-4">
-                Verify and validate citations in your documents
-              </p>
-              <a
-                href="/citation-checker"
-                className="text-black underline hover:no-underline inline-block"
-              >
-                Open Citation Checker →
-              </a>
-            </div>
+            {user.role === "admin" && (
+              <>
+                <div className="border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-2">
+                    Heavy Model Analysis
+                  </h2>
+                  <p className="text-black mb-4">
+                    Run comprehensive citation analysis using Claude Sonnet
+                  </p>
+                  <a
+                    href="/heavy-analysis"
+                    className="text-black underline hover:no-underline inline-block"
+                  >
+                    Open Heavy Analysis →
+                  </a>
+                </div>
 
-            <div className="border border-gray-200 rounded-lg p-6">
-              <h2 className="text-xl font-semibold text-black mb-2">
-                Heavy Model Analysis
-              </h2>
-              <p className="text-black mb-4">
-                Run comprehensive citation analysis using Claude Sonnet
-              </p>
-              <a
-                href="/heavy-analysis"
-                className="text-black underline hover:no-underline inline-block"
-              >
-                Open Heavy Analysis →
-              </a>
-            </div>
+                <div className="border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-2">
+                    Multi-Run Test
+                  </h2>
+                  <p className="text-black mb-4">
+                    Configure multi-run tests to assess validation consistency
+                  </p>
+                  <a
+                    href="/test-run"
+                    className="text-black underline hover:no-underline inline-block"
+                  >
+                    Open Test Run →
+                  </a>
+                </div>
 
-            <div className="border border-gray-200 rounded-lg p-6">
-              <h2 className="text-xl font-semibold text-black mb-2">
-                Multi-Run Test
-              </h2>
-              <p className="text-black mb-4">
-                Configure multi-run tests to assess validation consistency
-              </p>
-              <a
-                href="/test-run"
-                className="text-black underline hover:no-underline inline-block"
-              >
-                Open Test Run →
-              </a>
-            </div>
+                <div className="border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-2">
+                    Citation Analysis
+                  </h2>
+                  <p className="text-black mb-4">
+                    View statistics and insights on citation validation
+                  </p>
+                  <a
+                    href="/citation-checker/analysis"
+                    className="text-black underline hover:no-underline inline-block"
+                  >
+                    View Analysis →
+                  </a>
+                </div>
 
-            <div className="border border-gray-200 rounded-lg p-6">
-              <h2 className="text-xl font-semibold text-black mb-2">
-                Citation Analysis
-              </h2>
-              <p className="text-black mb-4">
-                View statistics and insights on citation validation
-              </p>
-              <a
-                href="/citation-checker/analysis"
-                className="text-black underline hover:no-underline inline-block"
-              >
-                View Analysis →
-              </a>
-            </div>
-
-            <div className="border border-gray-200 rounded-lg p-6">
-              <h2 className="text-xl font-semibold text-black mb-2">
-                AI Prompts Reference
-              </h2>
-              <p className="text-black mb-4">
-                View the current prompts used by each validation agent
-              </p>
-              <a
-                href="/dashboard/prompts"
-                className="text-black underline hover:no-underline inline-block"
-              >
-                View Prompts →
-              </a>
-            </div>
+                <div className="border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-2">
+                    AI Prompts Reference
+                  </h2>
+                  <p className="text-black mb-4">
+                    View the current prompts used by each validation agent
+                  </p>
+                  <a
+                    href="/dashboard/prompts"
+                    className="text-black underline hover:no-underline inline-block"
+                  >
+                    View Prompts →
+                  </a>
+                </div>
+              </>
+            )}
 
             <div className="border border-gray-200 rounded-lg p-6">
               <h2 className="text-xl font-semibold text-black mb-2">
@@ -151,7 +170,7 @@ export default async function DashboardPage() {
                 </li>
                 <li>
                   <a href="/citation-checker" className="underline hover:no-underline">
-                    Citation Checker
+                    Documents
                   </a>
                 </li>
                 {user.role === "admin" && (

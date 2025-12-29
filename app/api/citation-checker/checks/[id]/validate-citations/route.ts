@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { createValidationJob, retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-identification/queue"
 import { ANTHROPIC_API_KEY } from "@/lib/env"
 import { CitationDocument } from "@/types/citation-json"
+import { canModifyWorkflow } from "@/lib/access-control"
 
 export async function POST(
   request: NextRequest,
@@ -69,6 +70,12 @@ export async function POST(
         { error: "JSON data not found" },
         { status: 400 }
       )
+    }
+
+    // Check if user can modify workflow
+    const canModify = await canModifyWorkflow(user.id, id)
+    if (!canModify) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     // Cast jsonData to CitationDocument type

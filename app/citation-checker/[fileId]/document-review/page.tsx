@@ -29,26 +29,26 @@ export default async function DocumentReviewPageRoute({
         <div className="max-w-7xl mx-auto">
           <div className="mb-8">
             <h1 className="text-4xl font-normal text-black mb-4">
-              Citation Checker Workflow
+              Document Workflow
             </h1>
             <p className="text-black text-lg">
-              Step-by-step citation validation process
+              Review and validate your legal document
             </p>
           </div>
 
           <StepProgress 
             currentStep="document-review" 
-            completedSteps={new Set(["upload", "generate-json", "identify-citations", "validate-citations", "review-discrepancies", "citations-report", "full-analysis"])}
+            completedSteps={new Set(["upload", "validate-citations"])}
             fileId={fileId}
           />
 
           <div className="border border-gray-200 rounded-lg p-8 bg-white">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold text-black mb-2">
-                Step 8: Document Review
+                Step 3: Review Citations
               </h2>
               <p className="text-black text-gray-600">
-                Review your document by paragraph with analysis indicators
+                Review your document by paragraph with analysis indicators and approve/edit citations
               </p>
             </div>
             <DocumentReviewPage fileId={fileId} checkId={checkId} />

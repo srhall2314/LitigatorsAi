@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { identifyCitations } from "@/lib/citation-identification"
+import { canModifyWorkflow } from "@/lib/access-control"
 
 export async function POST(
   request: NextRequest,
@@ -38,6 +39,12 @@ export async function POST(
         { error: "JSON data not found. Please generate JSON first." },
         { status: 400 }
       )
+    }
+
+    // Check if user can modify workflow
+    const canModify = await canModifyWorkflow(user.id, id)
+    if (!canModify) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     // Get the latest version for this fileUploadId to determine next version number
