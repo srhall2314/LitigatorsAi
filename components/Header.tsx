@@ -62,6 +62,9 @@ export function Header() {
           </nav>
         </div>
       </div>
+      <div className="bg-red-600 text-white text-xs text-center py-1 px-4">
+        BETA System: Data may not be secure; data loss may occur.
+      </div>
     </header>
   )
 }
