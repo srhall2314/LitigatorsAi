@@ -1815,6 +1815,23 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
                                           {agent.reasoning}
                                         </div>
                                       )}
+                                      <div className="text-xs mt-1">
+                                        <span className="font-medium">Case Link: </span>
+                                        {agent.case_link ? (
+                                          <a 
+                                            href={agent.case_link} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-blue-600 hover:text-blue-800 underline break-all"
+                                          >
+                                            {agent.case_link.length > 60 
+                                              ? `${agent.case_link.substring(0, 60)}...` 
+                                              : agent.case_link}
+                                          </a>
+                                        ) : (
+                                          <span className="text-gray-500 italic">NOT_FOUND</span>
+                                        )}
+                                      </div>
                                       {!isNewFormatT3Agent && (agent.invalid_reason || agent.uncertain_reason) && (
                                         <div className="text-xs text-gray-500 mt-1">
                                           Reason: {agent.invalid_reason || agent.uncertain_reason}

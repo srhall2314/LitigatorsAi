@@ -41,6 +41,8 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
   const [notesText, setNotesText] = useState<string>("")
   const [savingNotes, setSavingNotes] = useState(false)
   const [showBackToEditorWarning, setShowBackToEditorWarning] = useState(false)
+  const [showDevSection, setShowDevSection] = useState(false)
+  const [jsonData, setJsonData] = useState<any>(null)
 
   useEffect(() => {
     const loadDocument = async () => {
@@ -87,6 +89,9 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
               const document = data.jsonData.document
               const content = document.content || []
               const citations = document.citations || []
+
+              // Store jsonData for download
+              setJsonData(data.jsonData)
 
               // Set metadata
               if (document.metadata) {
@@ -273,7 +278,7 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
     }
   }
 
-  const handleRevalidateCitation = async (citationId: string) => {
+  const handleRevalidateCitation = async (citationId: string, forceTier3: boolean = true) => {
     if (!checkId) return
 
     setRevalidatingCitations(prev => new Set(prev).add(citationId))
@@ -283,6 +288,12 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
         `/api/citation-checker/checks/${checkId}/citations/${citationId}/revalidate`,
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            forceTier3: forceTier3, // Always force Tier 3 when rechecking from document review page
+          }),
         }
       )
 
@@ -1284,6 +1295,23 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
                                                       <span>{agent.reasoning}</span>
                                                     </div>
                                                   )}
+                                                  <div className="mt-1 text-xs">
+                                                    <span className="font-medium">Case Link: </span>
+                                                    {agent.case_link ? (
+                                                      <a 
+                                                        href={agent.case_link} 
+                                                        target="_blank" 
+                                                        rel="noopener noreferrer"
+                                                        className="text-blue-600 hover:text-blue-800 underline break-all"
+                                                      >
+                                                        {agent.case_link.length > 60 
+                                                          ? `${agent.case_link.substring(0, 60)}...` 
+                                                          : agent.case_link}
+                                                      </a>
+                                                    ) : (
+                                                      <span className="text-gray-500 italic">NOT_FOUND</span>
+                                                    )}
+                                                  </div>
                                                   {(agent.invalid_reason || agent.uncertain_reason) && (
                                                     <div className="mt-1 text-xs text-gray-600">
                                                       <span className="font-medium">Reason Code: </span>
@@ -1346,6 +1374,90 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
           View Full Report →
         </Link>
       </div>
+
+      {/* Development Test Section */}
+      {showDevSection && (
+        <div className="mt-8 border-t-4 border-orange-300 pt-6">
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-orange-900">Development Test Section</h3>
+                <p className="text-sm text-orange-700 mt-1">
+                  Download JSON data for testing and development purposes
+                </p>
+              </div>
+              <button
+                onClick={() => setShowDevSection(false)}
+                className="px-3 py-1 text-xs bg-orange-200 text-orange-800 rounded hover:bg-orange-300"
+              >
+                Hide
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-semibold text-orange-900 mb-2">Complete Citation Check Data</h4>
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-700">
+                    Check ID: <span className="font-mono text-xs">{checkId || 'N/A'}</span>
+                  </p>
+                  <button
+                    onClick={async () => {
+                      try {
+                        if (!checkId) {
+                          alert('No check ID available')
+                          return
+                        }
+                        
+                        // Fetch the complete check record from the database
+                        const checkRes = await fetch(`/api/citation-checker/checks/${checkId}`)
+                        if (!checkRes.ok) {
+                          throw new Error('Failed to fetch check data')
+                        }
+                        
+                        const completeCheckData = await checkRes.json()
+                        
+                        // Download the entire check record
+                        const blob = new Blob([JSON.stringify(completeCheckData, null, 2)], { type: 'application/json' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        const dateStr = new Date().toISOString().split('T')[0]
+                        a.download = `citation-check-${fileId}-${checkId}-${dateStr}.json`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        URL.revokeObjectURL(url)
+                      } catch (error) {
+                        console.error('Error downloading JSON:', error)
+                        alert('Failed to download JSON. Please try again.')
+                      }
+                    }}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium shadow-sm"
+                  >
+                    Download JSON
+                  </button>
+                  <p className="text-xs text-orange-600 mt-1">
+                    Downloads the complete citation check record including: full document text (all paragraphs with inline citations), all citation validation data (Tier 2, Tier 3, manual reviews), workflow metadata, and related file/user information
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Show Dev Section Toggle */}
+      {!showDevSection && (
+        <div className="mt-6 pt-6 border-t border-gray-200">
+          <button
+            onClick={() => setShowDevSection(true)}
+            className="text-xs text-gray-500 hover:text-gray-700 underline"
+          >
+            Show Development Test Section
+          </button>
+        </div>
+      )}
 
       {/* Edit Notes Modal */}
       {editingNotes && (

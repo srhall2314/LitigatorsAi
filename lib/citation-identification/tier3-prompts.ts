@@ -18,6 +18,7 @@ export interface ParsedTier3AgentResponse {
   // New format: risk-based evaluation
   risk_level?: Tier3RiskLevel // LOW_RISK, MODERATE_RISK, or NEEDS_ADDITIONAL_REVIEW
   reasoning: string
+  case_link?: string // URL to verify the case/authority
   // Legacy format: kept for backward compatibility
   verdict?: Tier3AgentVerdictType // VALID, INVALID, or UNCERTAIN
   invalid_reason?: string
@@ -239,10 +240,45 @@ export function parseTier3AgentResponse(responseText: string, agentName: string)
     while (nextLine < lines.length && 
            !lines[nextLine].toUpperCase().startsWith('RISK_LEVEL:') &&
            !lines[nextLine].toUpperCase().startsWith('VERDICT:') &&
+           !lines[nextLine].toUpperCase().startsWith('CASE_LINK:') &&
            !lines[nextLine].toUpperCase().startsWith('INVALID_REASON:') &&
            !lines[nextLine].toUpperCase().startsWith('UNCERTAIN_REASON:')) {
       reasoning += ' ' + lines[nextLine]
       nextLine++
+    }
+  }
+  
+  // Extract case link - try multiple formats
+  let case_link: string | undefined
+  
+  // Try exact match first
+  const caseLinkLine = lines.find(l => l.toUpperCase().trim().startsWith('CASE_LINK:'))
+  if (caseLinkLine) {
+    const linkText = caseLinkLine.substring(caseLinkLine.toUpperCase().indexOf('CASE_LINK:') + 10).trim()
+    if (linkText && linkText.toUpperCase() !== 'NOT_FOUND' && linkText.length > 0) {
+      // Basic URL validation - must start with http:// or https://
+      if (linkText.startsWith('http://') || linkText.startsWith('https://')) {
+        case_link = linkText
+      }
+    }
+  }
+  
+  // Fallback: search for URLs in the response text if CASE_LINK wasn't found
+  if (!case_link) {
+    // Look for URLs in the entire response
+    const urlPattern = /https?:\/\/[^\s\)]+/gi
+    const urls = responseText.match(urlPattern)
+    if (urls && urls.length > 0) {
+      // Prefer URLs from legal databases (Westlaw, Lexis, Justia, CourtListener, etc.)
+      const legalDbUrls = urls.filter(url => 
+        /(westlaw|lexis|justia|courtlistener|law\.cornell|supremecourt|uscourts|caselaw\.findlaw)/i.test(url)
+      )
+      if (legalDbUrls.length > 0) {
+        case_link = legalDbUrls[0]
+      } else {
+        // Use first URL found
+        case_link = urls[0]
+      }
     }
   }
   
@@ -262,6 +298,7 @@ export function parseTier3AgentResponse(responseText: string, agentName: string)
   return {
     risk_level,
     reasoning: reasoning || 'No reasoning provided',
+    case_link,
     verdict, // Legacy format
     invalid_reason,
     uncertain_reason,
@@ -333,6 +370,13 @@ Use ALL of the following angles in your review:
    - Look for concrete problems: impossible court/reporter, nonsense volume or page, clearly mismatched subject matter, etc.
    - Generic party names or a good doctrinal fit ALONE are NOT reasons to call the citation fabricated.
 
+6. CASE LINK VERIFICATION
+   - Please provide a link to the case referenced by this citation to verify that the citation and any quotations are both real and accurate.
+   - Preferred sources (in order): official court websites, Westlaw, Lexis, Justia, CourtListener, or other reputable legal databases.
+   - For non-case citations (statutes, regulations, rules), provide links to official code websites or reputable legal databases.
+   - If you cannot find a valid link, respond with "NOT_FOUND".
+   - Note: The availability of a link does not affect your risk assessment - use it only for verification purposes.
+
 Assess the RISK LEVEL:
 - LOW_RISK: Citation appears authentic and reliable. You would confidently rely on this in court.
 - MODERATE_RISK: Some concerns exist but citation may still be valid. Requires additional verification.
@@ -341,7 +385,8 @@ Assess the RISK LEVEL:
 Respond in exactly this format:
 
 RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
-REASONING: <2-3 sentences explaining your risk assessment in practical "would I sign this brief?" terms>`
+REASONING: <2-3 sentences explaining your risk assessment in practical "would I sign this brief?" terms>
+CASE_LINK: <URL to the case/authority if found, or "NOT_FOUND" if unavailable>`
 }
 
 /**
@@ -409,6 +454,13 @@ Use ALL of the following angles in your review:
    - Generic or common party names are extremely common in real cases; they are neutral, not a red flag by themselves.
    - Unfamiliarity alone ("I have not seen this case before") is not a basis to call it fabricated.
 
+6. CASE LINK VERIFICATION
+   - Please provide a link to the case referenced by this citation to verify that the citation and any quotations are both real and accurate.
+   - Preferred sources (in order): official court websites, Westlaw, Lexis, Justia, CourtListener, or other reputable legal databases.
+   - For non-case citations (statutes, regulations, rules), provide links to official code websites or reputable legal databases.
+   - If you cannot find a valid link, respond with "NOT_FOUND".
+   - Note: The availability of a link does not affect your risk assessment - use it only for verification purposes.
+
 Assess the RISK LEVEL:
 - LOW_RISK: Citation appears to be a real, usable authority that you would sign off on.
 - MODERATE_RISK: Some concerns exist but citation may still be valid. Requires additional verification.
@@ -417,7 +469,8 @@ Assess the RISK LEVEL:
 Respond in exactly this format:
 
 RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
-REASONING: <2-3 sentences explaining your assessment from a research-check perspective>`
+REASONING: <2-3 sentences explaining your assessment from a research-check perspective>
+CASE_LINK: <URL to the case/authority if found, or "NOT_FOUND" if unavailable>`
 }
 
 /**
@@ -484,6 +537,13 @@ Use ALL of the following angles in your review:
    - Consider patterns such as impossible metadata, non-existent reporters, or mismatched issues — but you may only choose NEEDS_ADDITIONAL_REVIEW if these patterns connect to at least one concrete structural, temporal, or doctrinal problem.
    - Pattern-based concerns (naming patterns, alignment, WL/unpublished format, unfamiliarity, or "AI-feel") may increase uncertainty but cannot, by themselves, convert a citation into NEEDS_ADDITIONAL_REVIEW; NEEDS_ADDITIONAL_REVIEW requires at least one objective defect in structure, metadata, timing, or doctrine.
 
+6. CASE LINK VERIFICATION
+   - Please provide a link to the case referenced by this citation to verify that the citation and any quotations are both real and accurate.
+   - Preferred sources (in order): official court websites, Westlaw, Lexis, Justia, CourtListener, or other reputable legal databases.
+   - For non-case citations (statutes, regulations, rules), provide links to official code websites or reputable legal databases.
+   - If you cannot find a valid link, respond with "NOT_FOUND".
+   - Note: The availability of a link does not affect your risk assessment - use it only for verification purposes.
+
 Assess the RISK LEVEL:
 - LOW_RISK: Citation appears authentic and appropriate for a court to rely on.
 - MODERATE_RISK: Some concerns exist but citation may still be valid. Requires additional verification.
@@ -492,7 +552,8 @@ Assess the RISK LEVEL:
 Respond in exactly this format:
 
 RISK_LEVEL: LOW_RISK | MODERATE_RISK | NEEDS_ADDITIONAL_REVIEW
-REASONING: <2-3 sentences explaining your assessment from a judicial-review perspective>`
+REASONING: <2-3 sentences explaining your assessment from a judicial-review perspective>
+CASE_LINK: <URL to the case/authority if found, or "NOT_FOUND" if unavailable>`
 }
 
 /**

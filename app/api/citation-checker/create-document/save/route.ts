@@ -52,12 +52,8 @@ export async function POST(request: NextRequest) {
         orderBy: { version: 'desc' },
       })
 
-      if (latestCheck?.jsonData) {
-        return NextResponse.json(
-          { error: "Cannot edit document that has already entered citation workflow" },
-          { status: 400 }
-        )
-      }
+      // If document has jsonData, we'll reset it after saving to allow re-processing
+      const hasJsonData = !!latestCheck?.jsonData
 
       // Convert text to ArrayBuffer for blob storage
       const textBuffer = Buffer.from(documentText, 'utf-8')
@@ -71,10 +67,12 @@ export async function POST(request: NextRequest) {
       })
 
       // Update file metadata - only update originalName if a new name was provided
+      // Note: When editing, we always save as plain text, so update mimeType accordingly
       const updateData: any = {
         filename: blob.pathname,
         fileSize: textBuffer.length,
         blobUrl: blob.url,
+        mimeType: 'text/plain', // Always plain text when editing through the editor
         updatedAt: new Date(),
       }
       
@@ -114,6 +112,29 @@ export async function POST(request: NextRequest) {
         where: { id: fileId },
         data: updateData,
       })
+
+      // If document had jsonData, create a new citation check version to allow re-processing
+      if (hasJsonData && latestCheck) {
+        const newVersion = latestCheck.version + 1
+        const newCheck = await prisma.citationCheck.create({
+          data: {
+            fileUploadId: fileId,
+            userId: user.id,
+            version: newVersion,
+            status: "uploaded",
+            workflowType: "standard",
+            workflowId: null, // Will be set to check.id after creation
+            completedSteps: ["upload"],
+            currentStep: "generate-json",
+          },
+        })
+        
+        // Update workflowId to check.id for standard workflow grouping
+        await prisma.citationCheck.update({
+          where: { id: newCheck.id },
+          data: { workflowId: newCheck.id },
+        })
+      }
 
       return NextResponse.json({
         fileUpload: {

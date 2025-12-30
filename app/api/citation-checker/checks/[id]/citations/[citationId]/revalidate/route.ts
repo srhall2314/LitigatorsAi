@@ -76,6 +76,10 @@ export async function POST(
     // Extract context using extractDocumentContext
     const context = extractDocumentContext(citationId, jsonData, true)
 
+    // Get request body to check for forceTier3 flag
+    const body = await request.json().catch(() => ({}))
+    const forceTier3 = body.forceTier3 === true
+
     // Run Tier 2 validation
     const validation = await validateCitationWithPanel(
       citation,
@@ -83,9 +87,9 @@ export async function POST(
       ANTHROPIC_API_KEY
     )
 
-    // Check if Tier 3 is needed
+    // Check if Tier 3 is needed (either triggered by Tier 2 or forced by flag)
     let tier3Result = null
-    if (validation.consensus.tier_3_trigger) {
+    if (validation.consensus.tier_3_trigger || forceTier3) {
       // Run Tier 3 validation
       tier3Result = await validateCitationTier3(
         citation,

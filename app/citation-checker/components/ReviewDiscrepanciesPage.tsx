@@ -614,6 +614,23 @@ export function ReviewDiscrepanciesPage({ fileId }: ReviewDiscrepanciesPageProps
                                       <span>{agent.reasoning}</span>
                                     </div>
                                   )}
+                                  <div className="mt-1 text-xs">
+                                    <span className="font-medium">Case Link: </span>
+                                    {agent.case_link ? (
+                                      <a 
+                                        href={agent.case_link} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 underline break-all"
+                                      >
+                                        {agent.case_link.length > 60 
+                                          ? `${agent.case_link.substring(0, 60)}...` 
+                                          : agent.case_link}
+                                      </a>
+                                    ) : (
+                                      <span className="text-gray-500 italic">NOT_FOUND</span>
+                                    )}
+                                  </div>
                                   {(agent.invalid_reason || agent.uncertain_reason) && (
                                     <div className="mt-1 text-xs text-gray-600">
                                       <span className="font-medium">Reason Code: </span>

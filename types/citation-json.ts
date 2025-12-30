@@ -40,6 +40,7 @@ export interface Tier3AgentVerdict {
   // New format: risk-based evaluation
   risk_level?: Tier3RiskLevel;
   reasoning?: string; // Optional reasoning from the agent
+  case_link?: string; // URL to verify the case/authority
   // Legacy format: kept for backward compatibility
   verdict?: Tier3AgentVerdictType;
   invalid_reason?: string; // Reason code if verdict is INVALID (legacy)

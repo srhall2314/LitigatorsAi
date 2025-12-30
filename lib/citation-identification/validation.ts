@@ -496,6 +496,11 @@ async function callTier3Agent(
       }
     }
     
+    // Add case link if available
+    if (parsed.case_link) {
+      verdict.case_link = parsed.case_link
+    }
+    
     // Add token usage and cost if available
     if (tokenUsage) {
       verdict.token_usage = {
