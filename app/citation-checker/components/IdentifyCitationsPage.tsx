@@ -144,17 +144,23 @@ export function IdentifyCitationsPage({ fileId }: IdentifyCitationsPageProps) {
 
   return (
     <div className="space-y-6">
-      {/* Navigation Button at Top */}
-      {citations.length > 0 && (
-        <div className="pb-4 border-b border-gray-200">
+      {/* Navigation Buttons at Top */}
+      <div className="pb-4 border-b border-gray-200 flex justify-between items-center gap-4">
+        <button
+          onClick={() => router.push(`/citation-checker/create-document?fileId=${fileId}`)}
+          className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 whitespace-nowrap"
+        >
+          ← Back to Editor
+        </button>
+        {citations.length > 0 && (
           <button
             onClick={() => router.push(`/citation-checker/${fileId}/validate-citations`)}
-            className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+            className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
           >
             Continue to Validation
           </button>
-        </div>
-      )}
+        )}
+      </div>
       
       <div className="space-y-4">
         <div>

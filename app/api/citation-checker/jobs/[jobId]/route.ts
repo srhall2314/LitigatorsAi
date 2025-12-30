@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-identification/queue"
 import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { canModifyWorkflow } from "@/lib/access-control"
 import { logger } from "@/lib/logger"
 
 export async function GET(
@@ -37,7 +38,9 @@ export async function GET(
       return NextResponse.json({ error: 'Citation check not found' }, { status: 404 })
     }
 
-    if (check.userId !== user.id && user.role !== 'admin') {
+    // Check if user can modify workflow (owner, admin, or has edit/route permission)
+    const canModify = await canModifyWorkflow(user.id, job.checkId)
+    if (!canModify) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

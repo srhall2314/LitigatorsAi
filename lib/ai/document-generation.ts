@@ -33,11 +33,26 @@ CRITICAL RULES - RESPONSE FORMAT:
     "explanation": "Brief explanation of what changes were made (or empty string if no explanation needed)",
     "document": "The complete document text with all changes applied"
   }
+
+JSON FORMATTING REQUIREMENTS (CRITICAL):
+- Your response must be valid, parseable JSON - no text before or after the JSON object
+- The JSON must be complete and properly terminated (closing brace must be present)
+- All string values must be properly escaped:
+  * Double quotes (") inside strings must be escaped as \\"
+  * Backslashes (\\) must be escaped as \\\\
+  * Newlines must be escaped as \\n
+  * Tabs must be escaped as \\t
+- The "document" field is a JSON string value, so the entire document text must be properly escaped as a JSON string
+- Example of proper escaping: If the document contains "Hello "world"", the JSON field should be: "document": "Hello \\"world\\""
+- The JSON object must be complete - ensure the closing brace } is present and all strings are properly terminated
+- Test your JSON: Before responding, mentally verify that your JSON would parse correctly with JSON.parse()
+
+CONTENT REQUIREMENTS:
 - If the user provides existing document text, you must return the COMPLETE document with their existing content preserved, making ONLY the specific changes they requested. Do not remove, rewrite, or replace content that the user did not ask you to change.
-- The "document" field must contain the complete document text - no explanatory text, comments, or meta-commentary.
+- The "document" field must contain the complete document text as a properly escaped JSON string - no explanatory text, comments, or meta-commentary. The document text should be a plain string value, not JSON-encoded or nested.
 - The "explanation" field can contain a brief note about what was changed (e.g., "Cleaned up grammar and formatting", "Fixed citation errors"), or be an empty string if no explanation is needed.
 - When the user asks you to edit, clean, fix, correct, modify, or improve the document, you MUST return the complete edited document text in the "document" field.
-- Your response must be valid JSON - do not include any text before or after the JSON object.`
+- IMPORTANT: The "document" field value must be a plain text string (properly escaped for JSON), not a JSON object or nested structure. Put the entire document text directly in the "document" field as a string value.`
 
 // System prompt for asking questions (read-only mode)
 const DEFAULT_ASK_SYSTEM_PROMPT = `You are a legal document assistant. Your task is to answer questions about legal documents provided by the user.
@@ -273,11 +288,11 @@ export async function generateDocument(
         document: currentDocument,
         request: userMessage
       })
-      userContent = `Current document (JSON format):\n\`\`\`json\n${documentJson}\n\`\`\`\n\nUser request: ${userMessage}\n\nPlease return your response as JSON with "explanation" and "document" fields.`
+      userContent = `Current document (JSON format):\n\`\`\`json\n${documentJson}\n\`\`\`\n\nUser request: ${userMessage}\n\nIMPORTANT: Return your response as valid JSON only (no markdown code blocks, no text before/after). Format: {"explanation": "...", "document": "..."}. Ensure all quotes and special characters in the document field are properly escaped for JSON.`
     }
   } else if (mode === "edit") {
     // Even without existing document, request JSON format
-    userContent = `${userMessage}\n\nPlease return your response as JSON with "explanation" and "document" fields.`
+    userContent = `${userMessage}\n\nIMPORTANT: Return your response as valid JSON only (no markdown code blocks, no text before/after). Format: {"explanation": "...", "document": "..."}. Ensure all quotes and special characters in the document field are properly escaped for JSON.`
   }
 
   try {
@@ -444,21 +459,116 @@ export async function generateDocument(
     // Try to parse JSON response (for edit mode)
     if (mode === "edit") {
       try {
+        let jsonText = responseText.trim()
+        
+        console.log('[DocumentGeneration] Attempting to parse JSON, response length:', jsonText.length)
+        console.log('[DocumentGeneration] Response preview:', jsonText.substring(0, 200))
+        
         // Try to extract JSON from code blocks first
-        const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || 
-                         responseText.match(/```\s*([\s\S]*?)\s*```/)
+        const jsonMatch = jsonText.match(/```json\s*([\s\S]*?)\s*```/) || 
+                         jsonText.match(/```\s*([\s\S]*?)\s*```/)
         if (jsonMatch) {
-          parsedResponse = JSON.parse(jsonMatch[1])
+          jsonText = jsonMatch[1].trim()
+          console.log('[DocumentGeneration] Extracted JSON from code block')
+        }
+        
+        // Try to find JSON object boundaries if not already extracted
+        if (!jsonText.startsWith('{')) {
+          const firstBrace = jsonText.indexOf('{')
+          if (firstBrace !== -1) {
+            // Find the matching closing brace by counting braces
+            let braceCount = 0
+            let endIndex = -1
+            for (let i = firstBrace; i < jsonText.length; i++) {
+              if (jsonText[i] === '{') braceCount++
+              if (jsonText[i] === '}') {
+                braceCount--
+                if (braceCount === 0) {
+                  endIndex = i + 1
+                  break
+                }
+              }
+            }
+            if (endIndex > firstBrace) {
+              jsonText = jsonText.substring(firstBrace, endIndex)
+              console.log('[DocumentGeneration] Extracted JSON by brace matching, length:', jsonText.length)
+            } else {
+              // Fallback to last brace if matching fails
+              const lastBrace = jsonText.lastIndexOf('}')
+              if (lastBrace !== -1 && lastBrace > firstBrace) {
+                jsonText = jsonText.substring(firstBrace, lastBrace + 1)
+                console.log('[DocumentGeneration] Used fallback brace matching')
+              }
+            }
+          }
         } else {
-          // Try parsing the entire response as JSON
-          parsedResponse = JSON.parse(responseText.trim())
+          // Already starts with {, but make sure we have the complete object
+          let braceCount = 0
+          let endIndex = -1
+          for (let i = 0; i < jsonText.length; i++) {
+            if (jsonText[i] === '{') braceCount++
+            if (jsonText[i] === '}') {
+              braceCount--
+              if (braceCount === 0) {
+                endIndex = i + 1
+                break
+              }
+            }
+          }
+          if (endIndex > 0 && endIndex < jsonText.length) {
+            jsonText = jsonText.substring(0, endIndex)
+            console.log('[DocumentGeneration] Trimmed JSON to complete object, length:', jsonText.length)
+          }
+        }
+        
+        // Parse the JSON
+        console.log('[DocumentGeneration] Attempting JSON.parse, jsonText length:', jsonText.length)
+        const parsed = JSON.parse(jsonText)
+        console.log('[DocumentGeneration] JSON parsed successfully')
+        
+        // Ensure we have the expected structure with "document" field
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.document && typeof parsed.document === 'string') {
+            // Valid structure - use as is
+            parsedResponse = parsed
+          } else if (typeof parsed === 'string') {
+            // If the entire response is a string, treat it as document
+            parsedResponse = {
+              explanation: "",
+              document: parsed
+            }
+          } else {
+            // Try to find document in nested structure or use first string value
+            const documentValue = Object.values(parsed).find(v => typeof v === 'string' && v.length > 100)
+            if (documentValue) {
+              parsedResponse = {
+                explanation: parsed.explanation || "",
+                document: documentValue as string
+              }
+            } else {
+              // Fallback: stringify and use as document (shouldn't happen with proper AI)
+              console.warn('[DocumentGeneration] JSON structure unexpected, using fallback')
+              parsedResponse = {
+                explanation: "",
+                document: JSON.stringify(parsed, null, 2)
+              }
+            }
+          }
+        } else {
+          parsedResponse = null
         }
       } catch (e) {
         // JSON parsing failed, will use raw text
+        const errorMessage = e instanceof Error ? e.message : String(e)
+        const errorStack = e instanceof Error ? e.stack : undefined
         console.warn(
           `[DocumentGeneration] JSON parse failed, using raw text:`,
-          e instanceof Error ? e.message : String(e)
+          errorMessage
         )
+        if (errorStack) {
+          console.warn('[DocumentGeneration] Parse error stack:', errorStack)
+        }
+        console.warn('[DocumentGeneration] Response text that failed to parse (first 500 chars):', responseText.substring(0, 500))
         parsedResponse = null
       }
     }

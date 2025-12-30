@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { uploadBlob } from "@/lib/blob"
 import { requireAuth, handleApiError, getLatestCheck } from "@/lib/api-helpers"
+import { canAccessFile } from "@/lib/access-control"
 import { logger } from "@/lib/logger"
 
 export async function POST(request: NextRequest) {
@@ -31,8 +32,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "File not found" }, { status: 404 })
       }
 
-      // Check if user has permission (owner or has access)
-      if (existingFile.userId !== user.id) {
+      // Check if user has permission (owner, admin, or has access via share/case)
+      const hasAccess = await canAccessFile(user.id, fileId, 'edit')
+      if (!hasAccess) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
       }
 

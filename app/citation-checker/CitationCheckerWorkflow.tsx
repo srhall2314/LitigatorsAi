@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { ValidationSummary } from "./components/ValidationSummary"
 import { CitationsReportPage } from "./components/CitationsReportPage"
 
@@ -1171,6 +1171,7 @@ function IdentifyCitationsStep({
   checkId: string | null
   onCheckIdUpdate?: (newCheckId: string) => void
 }) {
+  const router = useRouter()
   const [identifying, setIdentifying] = useState(false)
   const [identifyingEyecite, setIdentifyingEyecite] = useState(false)
   const [citations, setCitations] = useState<any[]>([])
@@ -1367,6 +1368,17 @@ function IdentifyCitationsStep({
 
   return (
     <div className="space-y-6">
+      {/* Navigation Button at Top */}
+      {fileId && (
+        <div className="pb-4 border-b border-gray-200">
+          <button
+            onClick={() => router.push(`/citation-checker/create-document?fileId=${fileId}`)}
+            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 whitespace-nowrap"
+          >
+            ← Back to Editor
+          </button>
+        </div>
+      )}
       {loadingCheckId && (
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
           <p className="text-blue-800 text-sm">Loading citation check data...</p>

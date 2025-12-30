@@ -212,8 +212,9 @@ export async function DELETE(
       return NextResponse.json({ error: "Share not found" }, { status: 404 })
     }
 
-    // Check if user is owner or admin
-    if (share.fileUpload.userId !== user.id && user.role !== 'admin') {
+    // Check if user has route permission (owner, admin, or has route access via share/case)
+    const hasRoutePermission = await canAccessFile(user.id, fileId, 'route')
+    if (!hasRoutePermission) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 

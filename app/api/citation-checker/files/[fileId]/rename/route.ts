@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { canAccessFile } from "@/lib/access-control"
 import { logger } from "@/lib/logger"
 
 export async function PATCH(
@@ -31,8 +32,9 @@ export async function PATCH(
       return NextResponse.json({ error: "File not found" }, { status: 404 })
     }
 
-    // Check if user has permission (owner only for rename)
-    if (fileUpload.userId !== user.id) {
+    // Check if user has permission (owner, admin, or has edit access via share/case)
+    const hasAccess = await canAccessFile(user.id, fileId, 'edit')
+    if (!hasAccess) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
     }
 

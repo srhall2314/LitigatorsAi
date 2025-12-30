@@ -367,3 +367,4 @@ The implementation is straightforward and follows existing patterns in the codeb
 
 The feature is backward compatible (optional field) and doesn't require changes to the consensus calculation logic. The most important consideration is ensuring the AI provides valid URLs and handling cases where links cannot be found.
 
+

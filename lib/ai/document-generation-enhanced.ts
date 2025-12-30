@@ -322,15 +322,26 @@ Since this document will be processed by a citation validation system, you MUST:
 
 ### 4. Response Format
 You MUST respond with valid JSON only, in this exact format:
-\`\`\`json
 {
   "explanation": "Brief explanation of what was generated or changed",
   "document": "The complete document text with all content"
 }
-\`\`\`
 
-**Critical Rules:**
-- The "document" field must contain the COMPLETE document text
+**CRITICAL JSON FORMATTING REQUIREMENTS:**
+- Your response must be valid, parseable JSON - NO markdown code blocks, NO text before or after the JSON object
+- The JSON must be complete and properly terminated (closing brace } must be present)
+- All string values must be properly escaped for JSON:
+  * Double quotes (") inside strings must be escaped as \\"
+  * Backslashes (\\) must be escaped as \\\\
+  * Newlines must be escaped as \\n
+  * Tabs must be escaped as \\t
+- The "document" field is a JSON string value, so the entire document text must be properly escaped as a JSON string
+- Example: If the document contains "Hello "world"", the JSON should be: "document": "Hello \\"world\\""
+- The JSON object must be complete - ensure the closing brace } is present and all strings are properly terminated
+- DO NOT wrap your response in markdown code blocks (no \`\`\`json or \`\`\`) - return raw JSON only
+
+**Content Rules:**
+- The "document" field must contain the COMPLETE document text (properly escaped for JSON)
 - No explanatory text, comments, or meta-commentary in the document field
 - The "explanation" field should briefly describe what was created
 - When editing existing documents, preserve ALL existing content unless explicitly asked to remove or replace it

@@ -18,10 +18,18 @@ interface ChatMessage {
 type InteractionMode = "ask" | "edit"
 type Provider = "anthropic" | "openai" | "gemini" | "grok"
 
+interface ParagraphDiff {
+  original: string
+  modified: string
+  index: number
+  accepted: boolean | null // null = not decided, true = accepted, false = rejected
+}
+
 interface PendingChange {
   originalText: string
   newText: string
   userMessage: string
+  paragraphDiffs?: ParagraphDiff[] // For paragraph-based diffs
 }
 
 interface SavedPrompt {
@@ -78,9 +86,19 @@ export function CreateDocumentPage() {
   const [autoApply, setAutoApply] = useState(true) // Auto-apply changes by default
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [savedSuccessfully, setSavedSuccessfully] = useState(false)
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  
+  // Memoize DiffMatchPatch instance to avoid recreating it on every render
+  const dmpInstanceRef = useRef<InstanceType<typeof DiffMatchPatch> | null>(null)
+  const getDmpInstance = () => {
+    if (!dmpInstanceRef.current) {
+      dmpInstanceRef.current = new DiffMatchPatch()
+    }
+    return dmpInstanceRef.current
+  }
 
   // Saved prompts state - loaded from API
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([])
@@ -237,33 +255,221 @@ export function CreateDocumentPage() {
       let explanation: string = ""
       let chatMessageContent: string = ""
 
-      if (data.parsedResponse && data.parsedResponse.document) {
-        // JSON response - extract structured data
-        documentContent = data.parsedResponse.document
-        explanation = data.parsedResponse.explanation || ""
-        
-        console.log('[DocumentUpdate] JSON response parsed:', {
-          documentLength: documentContent?.length || 0,
-          explanationLength: explanation.length,
-          documentPreview: documentContent ? documentContent.substring(0, 100) + '...' : 'N/A',
-        })
-        
-        // Build chat message with explanation (if any) and note about document update
-        if (explanation) {
-          chatMessageContent = explanation
-        } else {
+      console.log('[DocumentUpdate] Processing response:', {
+        hasParsedResponse: !!data.parsedResponse,
+        parsedResponseType: typeof data.parsedResponse,
+        parsedResponseKeys: data.parsedResponse && typeof data.parsedResponse === 'object' ? Object.keys(data.parsedResponse) : null,
+        hasDocumentField: data.parsedResponse?.document !== undefined,
+        documentFieldType: typeof data.parsedResponse?.document,
+        rawResponseLength: data.response?.length || 0,
+        rawResponsePreview: data.response?.substring(0, 200) || 'N/A'
+      })
+
+      // Check if we have a parsed response with document field
+      if (data.parsedResponse) {
+        // Check if parsedResponse is the document string directly (fallback case)
+        if (typeof data.parsedResponse === 'string') {
+          documentContent = data.parsedResponse
+          explanation = ""
           chatMessageContent = "Document updated."
+          console.log('[DocumentUpdate] parsedResponse is string, using directly')
+        } 
+        // Check if parsedResponse has the expected structure with document field
+        else if (data.parsedResponse.document !== undefined) {
+          // Check if document field is a string
+          if (typeof data.parsedResponse.document === 'string') {
+            // JSON response - extract structured data
+            documentContent = data.parsedResponse.document
+            explanation = data.parsedResponse.explanation || ""
+            
+            console.log('[DocumentUpdate] Successfully extracted document from parsedResponse:', {
+              documentLength: documentContent?.length || 0,
+              explanationLength: explanation.length,
+              documentPreview: documentContent ? documentContent.substring(0, 100) + '...' : 'N/A',
+            })
+            
+            // Build chat message with explanation (if any) and note about document update
+            if (explanation) {
+              chatMessageContent = explanation
+            } else {
+              chatMessageContent = "Document updated."
+            }
+          } else {
+            // Document field exists but is not a string - this is an error
+            console.error('[DocumentUpdate] parsedResponse.document exists but is not a string:', {
+              documentType: typeof data.parsedResponse.document,
+              documentValue: String(data.parsedResponse.document).substring(0, 200)
+            })
+            // Try to extract from raw response instead
+            documentContent = extractDocumentContent(data.response)
+            chatMessageContent = data.response
+          }
+        } 
+        // If parsedResponse exists but doesn't have document field, try to extract it
+        else if (typeof data.parsedResponse === 'object' && data.parsedResponse !== null) {
+          console.warn('[DocumentUpdate] parsedResponse exists but missing document field, attempting extraction:', {
+            keys: Object.keys(data.parsedResponse),
+            parsedResponseType: typeof data.parsedResponse
+          })
+          
+          // Try to find a string field that looks like document content (longest string field)
+          const stringFields = Object.entries(data.parsedResponse)
+            .filter(([_, v]) => typeof v === 'string')
+            .sort(([_, a], [__, b]) => (b as string).length - (a as string).length)
+          
+          if (stringFields.length > 0) {
+            const [fieldName, fieldValue] = stringFields[0]
+            if ((fieldValue as string).length > 100) {
+              documentContent = fieldValue as string
+              explanation = (data.parsedResponse as any).explanation || ""
+              chatMessageContent = explanation || "Document updated."
+              console.log('[DocumentUpdate] Extracted document from field:', fieldName, 'length:', documentContent.length)
+            } else {
+              console.error('[DocumentUpdate] Found string field but too short:', fieldName, 'length:', (fieldValue as string).length)
+              documentContent = extractDocumentContent(data.response)
+              chatMessageContent = data.response
+            }
+          } else {
+            // No string fields found - this shouldn't happen
+            console.error('[DocumentUpdate] No string fields found in parsedResponse, using fallback')
+            documentContent = extractDocumentContent(data.response)
+            chatMessageContent = data.response
+          }
+        } else {
+          // parsedResponse exists but is unexpected type
+          console.warn('[DocumentUpdate] parsedResponse has unexpected type:', typeof data.parsedResponse)
+          documentContent = extractDocumentContent(data.response)
+          chatMessageContent = data.response
         }
       } else {
-        // Fallback to old format (non-JSON response)
-        console.warn('[DocumentUpdate] No parsedResponse, falling back to extractDocumentContent')
-        documentContent = extractDocumentContent(data.response)
-        chatMessageContent = data.response
+        // Fallback: Try to extract JSON from raw response
+        console.warn('[DocumentUpdate] No parsedResponse, attempting to extract JSON from raw response')
         
-        console.log('[DocumentUpdate] Extracted content:', {
-          extractedLength: documentContent.length,
-          extractedPreview: documentContent.substring(0, 100) + '...',
-        })
+        // First, try to find and parse JSON in the response
+        let jsonExtracted = false
+        try {
+          // Try to find JSON object in the response
+          const jsonMatch = data.response.match(/\{[\s\S]*"document"[\s\S]*"explanation"[\s\S]*\}/) ||
+                           data.response.match(/\{[\s\S]*"explanation"[\s\S]*"document"[\s\S]*\}/)
+          
+          if (jsonMatch) {
+            // Find the start of the JSON object
+            let startIndex = data.response.indexOf('{')
+            
+            if (startIndex !== -1) {
+              // Extract JSON using a parser that respects strings
+              const extractedJson = extractJsonObject(data.response, startIndex)
+              
+              if (extractedJson) {
+                try {
+                  const parsed = JSON.parse(extractedJson)
+                  if (parsed.document && typeof parsed.document === 'string') {
+                    documentContent = parsed.document
+                    explanation = parsed.explanation || ""
+                    chatMessageContent = explanation || "Document updated."
+                    jsonExtracted = true
+                    console.log('[DocumentUpdate] Successfully extracted JSON from raw response')
+                  }
+                } catch (parseError) {
+                  console.warn('[DocumentUpdate] Failed to parse extracted JSON:', parseError)
+                  // Try to extract document field even from malformed JSON
+                  const extracted = extractDocumentFieldFromJson(extractedJson)
+                  if (extracted.document) {
+                    documentContent = extracted.document
+                    explanation = extracted.explanation || ""
+                    chatMessageContent = explanation || "Document updated."
+                    jsonExtracted = true
+                    console.log('[DocumentUpdate] Extracted document field from malformed JSON')
+                  }
+                }
+              } else {
+                // If we couldn't extract a complete JSON object, try to extract the document field directly
+                const extracted = extractDocumentFieldFromJson(data.response)
+                if (extracted.document) {
+                  documentContent = extracted.document
+                  explanation = extracted.explanation || ""
+                  chatMessageContent = explanation || "Document updated."
+                  jsonExtracted = true
+                  console.log('[DocumentUpdate] Extracted document field from incomplete JSON')
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[DocumentUpdate] Error attempting JSON extraction:', e)
+        }
+        
+        // If JSON extraction failed, use the old extractDocumentContent method
+        if (!jsonExtracted) {
+          documentContent = extractDocumentContent(data.response)
+          chatMessageContent = data.response
+          
+          console.log('[DocumentUpdate] Extracted content:', {
+            extractedLength: documentContent.length,
+            extractedPreview: documentContent.substring(0, 100) + '...',
+          })
+        }
+      }
+
+      // CRITICAL: Final safety check - ensure we never use the stringified JSON object
+      if (documentContent && documentContent.trim().startsWith('{') && 
+          (documentContent.includes('"document"') || documentContent.includes('"explanation"'))) {
+        console.error('[DocumentUpdate] ERROR: documentContent appears to be JSON! Attempting to extract document field...')
+        try {
+          // Try to find complete JSON object using robust extraction
+          let jsonText = documentContent.trim()
+          
+          // If it doesn't start with {, try to find it
+          if (!jsonText.startsWith('{')) {
+            const firstBrace = jsonText.indexOf('{')
+            if (firstBrace !== -1) {
+              jsonText = jsonText.substring(firstBrace)
+            }
+          }
+          
+          // Use the robust JSON extraction function
+          const extractedJson = extractJsonObject(jsonText, 0)
+          
+          if (extractedJson) {
+            try {
+              const parsed = JSON.parse(extractedJson)
+              if (parsed.document && typeof parsed.document === 'string') {
+                documentContent = parsed.document
+                explanation = parsed.explanation || explanation
+                console.log('[DocumentUpdate] Successfully extracted document from JSON in final safety check')
+              } else {
+                console.error('[DocumentUpdate] Parsed JSON but document field is missing or not a string')
+                // Try to extract from the parsed JSON object anyway
+                const extracted = extractDocumentFieldFromJson(extractedJson)
+                if (extracted.document) {
+                  documentContent = extracted.document
+                  explanation = extracted.explanation || explanation
+                  console.log('[DocumentUpdate] Extracted document field from parsed JSON object')
+                }
+              }
+            } catch (parseError) {
+              console.error('[DocumentUpdate] Failed to parse JSON in final safety check:', parseError)
+              // Try to extract document field even from malformed JSON
+              const extracted = extractDocumentFieldFromJson(extractedJson)
+              if (extracted.document) {
+                documentContent = extracted.document
+                explanation = extracted.explanation || explanation
+                console.log('[DocumentUpdate] Extracted document field from malformed JSON in final safety check')
+              }
+            }
+          } else {
+            console.error('[DocumentUpdate] Could not find complete JSON object boundaries')
+            // Last resort: try to extract the document field directly from the text
+            const extracted = extractDocumentFieldFromJson(jsonText)
+            if (extracted.document) {
+              documentContent = extracted.document
+              explanation = extracted.explanation || explanation
+              console.log('[DocumentUpdate] Extracted document field using direct extraction')
+            }
+          }
+        } catch (e) {
+          console.error('[DocumentUpdate] Failed to parse JSON in final safety check:', e)
+        }
       }
 
       // Update chat messages
@@ -340,20 +546,24 @@ export function CreateDocumentPage() {
                   originalLength: documentText.length,
                   newLength: documentContent.length,
                 })
+                const paragraphDiffs = createParagraphDiffs(documentText, documentContent)
                 setPendingChange({
                   originalText: documentText,
                   newText: documentContent,
                   userMessage: userMessage,
+                  paragraphDiffs: paragraphDiffs,
                 })
               }
             }
           } else {
             // Manual review: show diff view
             console.log('[DocumentUpdate] Auto-apply disabled, showing diff for review')
+            const paragraphDiffs = createParagraphDiffs(documentText, documentContent)
             setPendingChange({
               originalText: documentText,
               newText: documentContent,
               userMessage: userMessage,
+              paragraphDiffs: paragraphDiffs,
             })
           }
         } else {
@@ -493,8 +703,87 @@ export function CreateDocumentPage() {
 
   const handleAcceptChange = () => {
     if (pendingChange) {
-      setDocumentTextWithLogging(pendingChange.newText, 'User accepted changes from diff view')
+      // If paragraph diffs exist and some are not accepted, apply only accepted paragraphs
+      if (pendingChange.paragraphDiffs && pendingChange.paragraphDiffs.length > 0) {
+        const acceptedDiffs = pendingChange.paragraphDiffs.filter(d => d.accepted === true)
+        const rejectedDiffs = pendingChange.paragraphDiffs.filter(d => d.accepted === false)
+        const undecidedDiffs = pendingChange.paragraphDiffs.filter(d => d.accepted === null)
+        
+        // If there are undecided paragraphs, don't apply - user needs to decide
+        if (undecidedDiffs.length > 0) {
+          alert(`Please accept or reject all ${undecidedDiffs.length} paragraph(s) before applying changes.`)
+          return
+        }
+        
+        // Build the new document by applying accepted paragraphs
+        const originalParas = splitIntoParagraphs(pendingChange.originalText)
+        const resultParagraphs: string[] = []
+        
+        // Process each paragraph diff
+        pendingChange.paragraphDiffs.forEach((diff) => {
+          if (diff.accepted === true) {
+            // Use the modified version
+            if (diff.modified) {
+              resultParagraphs.push(diff.modified)
+            }
+          } else if (diff.accepted === false) {
+            // Use the original version
+            if (diff.original) {
+              resultParagraphs.push(diff.original)
+            }
+          }
+        })
+        
+        // Join paragraphs with double newlines
+        const newDocumentText = resultParagraphs.join('\n\n')
+        setDocumentTextWithLogging(newDocumentText, 'User accepted partial changes from paragraph diff view')
+      } else {
+        // No paragraph diffs - apply all changes
+        setDocumentTextWithLogging(pendingChange.newText, 'User accepted changes from diff view')
+      }
       setPendingChange(null)
+    }
+  }
+
+  const handleAcceptParagraph = (index: number) => {
+    if (pendingChange?.paragraphDiffs) {
+      const updatedDiffs = [...pendingChange.paragraphDiffs]
+      updatedDiffs[index].accepted = true
+      setPendingChange({
+        ...pendingChange,
+        paragraphDiffs: updatedDiffs,
+      })
+    }
+  }
+
+  const handleRejectParagraph = (index: number) => {
+    if (pendingChange?.paragraphDiffs) {
+      const updatedDiffs = [...pendingChange.paragraphDiffs]
+      updatedDiffs[index].accepted = false
+      setPendingChange({
+        ...pendingChange,
+        paragraphDiffs: updatedDiffs,
+      })
+    }
+  }
+
+  const handleAcceptAllParagraphs = () => {
+    if (pendingChange?.paragraphDiffs) {
+      const updatedDiffs = pendingChange.paragraphDiffs.map(d => ({ ...d, accepted: true }))
+      setPendingChange({
+        ...pendingChange,
+        paragraphDiffs: updatedDiffs,
+      })
+    }
+  }
+
+  const handleRejectAllParagraphs = () => {
+    if (pendingChange?.paragraphDiffs) {
+      const updatedDiffs = pendingChange.paragraphDiffs.map(d => ({ ...d, accepted: false }))
+      setPendingChange({
+        ...pendingChange,
+        paragraphDiffs: updatedDiffs,
+      })
     }
   }
 
@@ -503,9 +792,170 @@ export function CreateDocumentPage() {
   }
 
   /**
+   * Extract a complete JSON object from text, properly handling strings and escape sequences
+   * This function respects string boundaries and only counts braces outside of strings
+   */
+  const extractJsonObject = (text: string, startIndex: number): string | null => {
+    if (startIndex < 0 || startIndex >= text.length || text[startIndex] !== '{') {
+      return null
+    }
+
+    let braceCount = 0
+    let inString = false
+    let escaped = false
+    let i = startIndex
+
+    while (i < text.length) {
+      const char = text[i]
+
+      if (escaped) {
+        // Skip escaped character
+        escaped = false
+        i++
+        continue
+      }
+
+      if (char === '\\') {
+        escaped = true
+        i++
+        continue
+      }
+
+      if (char === '"') {
+        inString = !inString
+        i++
+        continue
+      }
+
+      // Only count braces when not inside a string
+      if (!inString) {
+        if (char === '{') {
+          braceCount++
+        } else if (char === '}') {
+          braceCount--
+          if (braceCount === 0) {
+            // Found the matching closing brace
+            return text.substring(startIndex, i + 1)
+          }
+        }
+      }
+
+      i++
+    }
+
+    // Didn't find a complete JSON object
+    return null
+  }
+
+  /**
+   * Extract the "document" field value from JSON text, even if the JSON is malformed
+   * This is a fallback for when JSON.parse() fails due to unterminated strings or other issues
+   */
+  const extractDocumentFieldFromJson = (jsonText: string): { document: string | null; explanation: string } => {
+    const result = { document: null as string | null, explanation: "" }
+    
+    // Find the "document" field
+    const documentFieldMatch = jsonText.match(/"document"\s*:\s*"/)
+    if (!documentFieldMatch) {
+      return result
+    }
+    
+    const startIndex = documentFieldMatch.index! + documentFieldMatch[0].length
+    let extracted = ''
+    let i = startIndex
+    let escaped = false
+    
+    // Parse the JSON string value character by character, handling escapes
+    while (i < jsonText.length) {
+      const char = jsonText[i]
+      
+      if (escaped) {
+        extracted += char
+        escaped = false
+      } else if (char === '\\') {
+        extracted += char
+        escaped = true
+      } else if (char === '"') {
+        // Check if this is the closing quote (not part of the value)
+        // Look ahead to see if it's followed by comma, closing brace, or end of string
+        const remaining = jsonText.substring(i + 1)
+        const nextMatch = remaining.match(/^\s*([,}])/)
+        if (nextMatch) {
+          // This is the end of the document field value
+          try {
+            // Unescape the JSON string
+            result.document = JSON.parse(`"${extracted}"`)
+            break
+          } catch (parseError) {
+            // If JSON.parse fails, use the raw extracted value (might have issues but better than nothing)
+            result.document = extracted
+            break
+          }
+        } else {
+          // This quote is part of the string value
+          extracted += char
+        }
+      } else {
+        extracted += char
+      }
+      
+      i++
+    }
+    
+    // Also try to extract explanation field using the same character-by-character approach
+    const explanationFieldMatch = jsonText.match(/"explanation"\s*:\s*"/)
+    if (explanationFieldMatch) {
+      const expStartIndex = explanationFieldMatch.index! + explanationFieldMatch[0].length
+      let expExtracted = ''
+      let expI = expStartIndex
+      let expEscaped = false
+      
+      while (expI < jsonText.length) {
+        const char = jsonText[expI]
+        
+        if (expEscaped) {
+          expExtracted += char
+          expEscaped = false
+        } else if (char === '\\') {
+          expExtracted += char
+          expEscaped = true
+        } else if (char === '"') {
+          const remaining = jsonText.substring(expI + 1)
+          const nextMatch = remaining.match(/^\s*([,}])/)
+          if (nextMatch) {
+            try {
+              result.explanation = JSON.parse(`"${expExtracted}"`)
+            } catch {
+              result.explanation = expExtracted.replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+            }
+            break
+          } else {
+            expExtracted += char
+          }
+        } else {
+          expExtracted += char
+        }
+        
+        expI++
+      }
+    }
+    
+    return result
+  }
+
+  /**
    * Extract document content from AI response, removing any explanatory text
    */
   const extractDocumentContent = (response: string): string => {
+    // First, check if this looks like JSON and try to extract the document field
+    const trimmed = response.trim()
+    if (trimmed.startsWith('{') && (trimmed.includes('"document"') || trimmed.includes('"explanation"'))) {
+      const extracted = extractDocumentFieldFromJson(trimmed)
+      if (extracted.document) {
+        return extracted.document
+      }
+    }
+    
     // Remove common explanatory prefixes
     const explanatoryPrefixes = [
       /^here are the (document )?edits?:?\s*/i,
@@ -576,37 +1026,162 @@ export function CreateDocumentPage() {
     return cleaned.trim()
   }
 
+  // DiffMatchPatch operation constants
+  const DIFF_DELETE = -1
+  const DIFF_INSERT = 1
+  const DIFF_EQUAL = 0
+
+  /**
+   * Split text into paragraphs (by double newlines or single newlines if no doubles)
+   */
+  const splitIntoParagraphs = (text: string): string[] => {
+    if (!text.trim()) return []
+    
+    // Normalize line breaks
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    
+    // Try splitting by double newlines first
+    let paragraphs = normalized.split(/\n\s*\n+/).map(p => p.trim()).filter(p => p.length > 0)
+    
+    // If no double newlines or only one huge paragraph, split by single newlines
+    if (paragraphs.length === 0 || (paragraphs.length === 1 && paragraphs[0].length > 2000)) {
+      paragraphs = normalized.split(/\n/).map(p => p.trim()).filter(p => p.length > 0)
+    }
+    
+    // If still empty but we have text, treat entire text as one paragraph
+    if (paragraphs.length === 0 && text.trim().length > 0) {
+      paragraphs = [text.trim()]
+    }
+    
+    return paragraphs
+  }
+
+  /**
+   * Create paragraph-based diffs by matching paragraphs between original and modified text
+   */
+  const createParagraphDiffs = (original: string, modified: string): ParagraphDiff[] => {
+    const originalParas = splitIntoParagraphs(original)
+    const modifiedParas = splitIntoParagraphs(modified)
+    const dmp = getDmpInstance()
+    const paragraphDiffs: ParagraphDiff[] = []
+    
+    // Create a simple matching algorithm
+    // For each modified paragraph, try to find the best matching original paragraph
+    const usedOriginalIndices = new Set<number>()
+    
+    modifiedParas.forEach((modifiedPara, modIdx) => {
+      let bestMatchIdx = -1
+      let bestSimilarity = 0
+      
+      // Find the best matching original paragraph
+      originalParas.forEach((originalPara, origIdx) => {
+        if (usedOriginalIndices.has(origIdx)) return
+        
+        const diffs = dmp.diff_main(originalPara, modifiedPara)
+        dmp.diff_cleanupSemantic(diffs)
+        const similarity = dmp.diff_levenshtein(diffs)
+        const maxLen = Math.max(originalPara.length, modifiedPara.length)
+        const similarityRatio = maxLen > 0 ? 1 - (similarity / maxLen) : 0
+        
+        if (similarityRatio > bestSimilarity) {
+          bestSimilarity = similarityRatio
+          bestMatchIdx = origIdx
+        }
+      })
+      
+      // If we found a good match (similarity > 0.3), pair them
+      if (bestMatchIdx >= 0 && bestSimilarity > 0.3) {
+        usedOriginalIndices.add(bestMatchIdx)
+        paragraphDiffs.push({
+          original: originalParas[bestMatchIdx],
+          modified: modifiedPara,
+          index: paragraphDiffs.length,
+          accepted: null,
+        })
+      } else {
+        // New paragraph (no match found)
+        paragraphDiffs.push({
+          original: '',
+          modified: modifiedPara,
+          index: paragraphDiffs.length,
+          accepted: null,
+        })
+      }
+    })
+    
+    // Add any original paragraphs that weren't matched (deleted paragraphs)
+    originalParas.forEach((originalPara, origIdx) => {
+      if (!usedOriginalIndices.has(origIdx)) {
+        paragraphDiffs.push({
+          original: originalPara,
+          modified: '',
+          index: paragraphDiffs.length,
+          accepted: null,
+        })
+      }
+    })
+    
+    return paragraphDiffs
+  }
+
   const renderDiff = (original: string, modified: string): JSX.Element[] => {
-    const dmp = new DiffMatchPatch()
+    // Handle edge cases
+    if (!original && !modified) {
+      return []
+    }
+    if (!original) {
+      return [
+        <span key="all-new" className="bg-green-100 text-green-800 font-medium">
+          {modified}
+        </span>
+      ]
+    }
+    if (!modified) {
+      return [
+        <span key="all-deleted" className="bg-red-100 text-red-800 line-through">
+          {original}
+        </span>
+      ]
+    }
+
+    const dmp = getDmpInstance()
     const diffs = dmp.diff_main(original, modified)
     dmp.diff_cleanupSemantic(diffs)
 
     const elements: JSX.Element[] = []
-    let key = 0
+    let keyCounter = 0
 
     diffs.forEach(([operation, text]: [number, string]) => {
+      // Handle empty text segments
+      if (!text) {
+        return
+      }
+
       // Split by newlines to handle line breaks properly
+      // Using split with capture group to preserve newlines in the array
       const parts = text.split(/(\n)/)
       
-      parts.forEach((part, partIdx) => {
+      parts.forEach((part) => {
         if (part === '\n') {
-          elements.push(<br key={`br-${key++}`} />)
+          // Render newline as a line break
+          elements.push(<br key={`br-${keyCounter++}`} />)
         } else if (part.length > 0) {
-          if (operation === -1) { // DIFF_DELETE
+          // Render text segment with appropriate styling based on operation
+          if (operation === DIFF_DELETE) {
             elements.push(
-              <span key={key++} className="bg-red-100 text-red-800 line-through">
+              <span key={`del-${keyCounter++}`} className="bg-red-100 text-red-800 line-through">
                 {part}
               </span>
             )
-          } else if (operation === 1) { // DIFF_INSERT
+          } else if (operation === DIFF_INSERT) {
             elements.push(
-              <span key={key++} className="bg-green-100 text-green-800 font-medium">
+              <span key={`ins-${keyCounter++}`} className="bg-green-100 text-green-800 font-medium">
                 {part}
               </span>
             )
-          } else { // DIFF_EQUAL (0)
+          } else { // DIFF_EQUAL
             elements.push(
-              <span key={key++} className="text-gray-700">
+              <span key={`eq-${keyCounter++}`} className="text-gray-700">
                 {part}
               </span>
             )
@@ -657,8 +1232,11 @@ export function CreateDocumentPage() {
           router.push(`/citation-checker/${fileId}/run-citation-checker`)
         }
       } else {
-        // Just show success message
-        alert("Document saved successfully!")
+        // Show success indicator
+        setSavedSuccessfully(true)
+        setTimeout(() => {
+          setSavedSuccessfully(false)
+        }, 3000) // Hide after 3 seconds
       }
     } catch (error) {
       console.error("Error saving document:", error)
@@ -828,21 +1406,31 @@ export function CreateDocumentPage() {
             />
           </div>
           <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-gray-50">
-            <div className="flex gap-3">
-              <button
-                onClick={() => handleSave(false)}
-                disabled={!documentText.trim() || saving}
-                className="flex-1 px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-              <button
-                onClick={handleSaveAndContinue}
-                disabled={!documentText.trim() || saving}
-                className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? "Saving..." : "Save & Continue"}
-              </button>
+            <div className="flex flex-col gap-3">
+              {savedSuccessfully && (
+                <div className="px-4 py-2 bg-green-50 border border-green-200 rounded-md flex items-center gap-2">
+                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="text-sm font-medium text-green-800">Document saved successfully!</span>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleSave(false)}
+                  disabled={!documentText.trim() || saving}
+                  className="flex-1 px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={handleSaveAndContinue}
+                  disabled={!documentText.trim() || saving}
+                  className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? "Saving..." : "Save & Continue"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -971,40 +1559,143 @@ export function CreateDocumentPage() {
           {/* Diff Review Dialog */}
           {pendingChange && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] flex flex-col">
+              <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] flex flex-col">
                 <div className="p-6 border-b border-gray-200">
                   <h3 className="text-lg font-semibold text-black mb-2">
-                    Review Changes
+                    Review Changes by Paragraph
                   </h3>
                   <p className="text-sm text-gray-600 mb-1">
                     Your request: <span className="font-medium italic">"{pendingChange.userMessage}"</span>
                   </p>
                   <p className="text-xs text-gray-500">
                     <span className="bg-red-100 text-red-800 px-1 rounded">Red</span> = removed,{" "}
-                    <span className="bg-green-100 text-green-800 px-1 rounded">Green</span> = added
+                    <span className="bg-green-100 text-green-800 px-1 rounded">Green</span> = added.{" "}
+                    Review each paragraph and accept or reject individually.
                   </p>
+                  {pendingChange.paragraphDiffs && (
+                    <div className="mt-2 text-xs text-gray-600">
+                      {pendingChange.paragraphDiffs.filter(d => d.accepted === true).length} accepted,{" "}
+                      {pendingChange.paragraphDiffs.filter(d => d.accepted === false).length} rejected,{" "}
+                      {pendingChange.paragraphDiffs.filter(d => d.accepted === null).length} pending
+                    </div>
+                  )}
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6">
-                  <div className="bg-gray-50 border border-gray-200 rounded-md p-4 font-mono text-sm">
-                    <div className="whitespace-pre-wrap">
-                      {renderDiff(pendingChange.originalText, pendingChange.newText)}
+                  {pendingChange.paragraphDiffs && pendingChange.paragraphDiffs.length > 0 ? (
+                    // Paragraph-based diff view
+                    <div className="space-y-4">
+                      {pendingChange.paragraphDiffs.map((paraDiff, idx) => {
+                        const isAccepted = paraDiff.accepted === true
+                        const isRejected = paraDiff.accepted === false
+                        const isPending = paraDiff.accepted === null
+                        
+                        return (
+                          <div
+                            key={idx}
+                            className={`border-2 rounded-lg p-4 ${
+                              isAccepted
+                                ? 'border-green-300 bg-green-50'
+                                : isRejected
+                                ? 'border-red-300 bg-red-50'
+                                : 'border-gray-300 bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-gray-600">
+                                  Paragraph {idx + 1}
+                                </span>
+                                {isAccepted && (
+                                  <span className="text-xs bg-green-200 text-green-800 px-2 py-0.5 rounded">
+                                    Accepted
+                                  </span>
+                                )}
+                                {isRejected && (
+                                  <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded">
+                                    Rejected
+                                  </span>
+                                )}
+                                {isPending && (
+                                  <span className="text-xs bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded">
+                                    Pending
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleRejectParagraph(idx)}
+                                  disabled={isRejected}
+                                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                                    isRejected
+                                      ? 'bg-red-200 text-red-800 cursor-not-allowed'
+                                      : 'bg-red-100 text-red-700 hover:bg-red-200'
+                                  }`}
+                                >
+                                  Reject
+                                </button>
+                                <button
+                                  onClick={() => handleAcceptParagraph(idx)}
+                                  disabled={isAccepted}
+                                  className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                                    isAccepted
+                                      ? 'bg-green-200 text-green-800 cursor-not-allowed'
+                                      : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  }`}
+                                >
+                                  Accept
+                                </button>
+                              </div>
+                            </div>
+                            <div className="bg-white border border-gray-200 rounded-md p-3 font-mono text-sm">
+                              <div className="whitespace-pre-wrap">
+                                {renderDiff(paraDiff.original, paraDiff.modified)}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  </div>
+                  ) : (
+                    // Fallback to full document diff if paragraph diffs not available
+                    <div className="bg-gray-50 border border-gray-200 rounded-md p-4 font-mono text-sm">
+                      <div className="whitespace-pre-wrap">
+                        {renderDiff(pendingChange.originalText, pendingChange.newText)}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-                  <button
-                    onClick={handleRejectChange}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                  >
-                    Reject
-                  </button>
+                <div className="p-6 border-t border-gray-200 flex justify-between items-center">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleRejectChange}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
+                      Cancel
+                    </button>
+                    {pendingChange.paragraphDiffs && pendingChange.paragraphDiffs.length > 0 && (
+                      <>
+                        <button
+                          onClick={handleRejectAllParagraphs}
+                          className="px-4 py-2 border border-red-300 text-red-700 rounded-md hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                        >
+                          Reject All
+                        </button>
+                        <button
+                          onClick={handleAcceptAllParagraphs}
+                          className="px-4 py-2 border border-green-300 text-green-700 rounded-md hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                        >
+                          Accept All
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <button
                     onClick={handleAcceptChange}
                     className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                   >
-                    Accept Changes
+                    Apply Selected Changes
                   </button>
                 </div>
               </div>
