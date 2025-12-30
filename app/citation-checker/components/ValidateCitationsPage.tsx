@@ -350,7 +350,7 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
         <div className="pb-4 border-b border-gray-200">
           <button
             onClick={() => router.push(`/citation-checker/${fileId}/review-discrepancies`)}
-            className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+            className={buttonStyles.primary + " py-3"}
           >
             Continue to Review Discrepancies
           </button>
@@ -363,7 +363,7 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
           handleValidate()
         }}
         disabled={validating || !checkId}
-        className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+        className={buttonStyles.primary + " py-3"}
       >
         {validating ? "Validating Citations..." : "Validate Citations"}
       </button>

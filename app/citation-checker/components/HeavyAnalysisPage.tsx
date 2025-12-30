@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { buttonStyles } from "@/lib/styles"
 
 interface HeavyAnalysisPageProps {
   fileId: string
@@ -277,30 +278,50 @@ export function HeavyAnalysisPage({ fileId }: HeavyAnalysisPageProps) {
       )}
 
       {result && (
-        <div className="p-4 bg-green-50 border border-green-200 rounded-md">
-          <p className="text-green-800 font-medium mb-2">{result.message}</p>
-          <div className="text-sm text-green-700 space-y-1">
-            <p>Check ID: {result.checkId}</p>
-            <p>Version: {result.version}</p>
-            <p>Citations Analyzed: {result.citationsAnalyzed}</p>
-            <div className="mt-2">
-              <p className="font-medium">Risk Level Distribution:</p>
-              <ul className="list-disc list-inside ml-2">
-                <li>Low Risk: {result.riskLevelCounts['Low Risk']}</li>
-                <li>Medium Risk: {result.riskLevelCounts['Medium Risk']}</li>
-                <li>Human Review: {result.riskLevelCounts['human review']}</li>
-              </ul>
+        <>
+          <div className="p-4 bg-green-50 border border-green-200 rounded-md">
+            <p className="text-green-800 font-medium mb-2">{result.message}</p>
+            <div className="text-sm text-green-700 space-y-1">
+              <p>Check ID: {result.checkId}</p>
+              <p>Version: {result.version}</p>
+              <p>Citations Analyzed: {result.citationsAnalyzed}</p>
+              <div className="mt-2">
+                <p className="font-medium">Risk Level Distribution:</p>
+                <ul className="list-disc list-inside ml-2">
+                  <li>Low Risk: {result.riskLevelCounts['Low Risk']}</li>
+                  <li>Medium Risk: {result.riskLevelCounts['Medium Risk']}</li>
+                  <li>Human Review: {result.riskLevelCounts['human review']}</li>
+                </ul>
+              </div>
             </div>
-            <p className="mt-2">Total Cost: ${result.totalCost}</p>
           </div>
-        </div>
+          
+          {/* Cost Information - Development Panel */}
+          <div className="mt-8 border-t-4 border-orange-300 pt-6">
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+                <p className="text-sm font-medium text-orange-800 mb-2">Cost Information</p>
+                <p className="text-sm text-orange-700 mt-1">
+                  LLM cost tracking for development purposes (not part of final product)
+                </p>
+              </div>
+              <div>
+                <div className="text-xs text-orange-600 font-medium mb-1">Total Cost</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  ${result.totalCost}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       <div className="flex space-x-4">
         <button
           onClick={handleRunHeavyAnalysis}
           disabled={running || (runMode === 'multi' && (numberOfRuns < 1 || numberOfRuns > 10))}
-          className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className={buttonStyles.primary + " py-3"}
         >
           {running 
             ? (runMode === 'multi' ? `Running ${numberOfRuns} Analysis${numberOfRuns > 1 ? 'es' : ''}...` : "Running Analysis...")
@@ -310,7 +331,7 @@ export function HeavyAnalysisPage({ fileId }: HeavyAnalysisPageProps) {
         <button
           onClick={() => router.back()}
           disabled={running}
-          className="px-6 py-3 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+          className={buttonStyles.secondary + " py-3"}
         >
           Back
         </button>

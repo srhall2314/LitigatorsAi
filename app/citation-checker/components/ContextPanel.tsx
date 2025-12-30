@@ -70,43 +70,50 @@ export function ContextPanel({
   }
 
   return (
-    <div className="mt-6 border-t border-gray-200 pt-6">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">Context & Debug Info</h3>
-      <div className="space-y-4">
-        {fileInfo && (
-          <div>
-            <div className="text-xs font-medium text-gray-500 mb-1">File Name</div>
-            <div className="text-sm text-black">{fileInfo.filename}</div>
-          </div>
-        )}
-        
-        {showCitationCount && citationCount !== null && (
-          <div>
-            <div className="text-xs font-medium text-gray-500 mb-1">Total Citations</div>
-            <div className="text-sm font-semibold text-black">{citationCount}</div>
-          </div>
-        )}
-        
-        {showValidationResults && validationResults && (
-          <div>
-            <div className="text-xs font-medium text-gray-500 mb-2">Validation Results</div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs text-gray-600">Low Risk</div>
-                <div className="text-lg font-bold text-green-600">{validationResults.valid}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-600">Needs Review</div>
-                <div className="text-lg font-bold text-red-600">{validationResults.invalid}</div>
+    <div className="mt-8 border-t-4 border-orange-300 pt-6">
+      <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+          <p className="text-sm font-medium text-orange-800 mb-2">Context & Debug Info</p>
+          <p className="text-sm text-orange-700 mt-1">
+            Debug information and context data for development purposes (not part of final product)
+          </p>
+        </div>
+        <div className="space-y-4">
+          {fileInfo && (
+            <div>
+              <div className="text-xs font-medium text-orange-600 mb-1">File Name</div>
+              <div className="text-sm text-gray-900">{fileInfo.filename}</div>
+            </div>
+          )}
+          
+          {showCitationCount && citationCount !== null && (
+            <div>
+              <div className="text-xs font-medium text-orange-600 mb-1">Total Citations</div>
+              <div className="text-sm font-semibold text-gray-900">{citationCount}</div>
+            </div>
+          )}
+          
+          {showValidationResults && validationResults && (
+            <div>
+              <div className="text-xs font-medium text-orange-600 mb-2">Validation Results</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-gray-600">Low Risk</div>
+                  <div className="text-lg font-bold text-green-600">{validationResults.valid}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600">Needs Review</div>
+                  <div className="text-lg font-bold text-red-600">{validationResults.invalid}</div>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-        
-        {showJson && jsonData && (
-          <div>
-            <div className="text-xs font-medium text-gray-500 mb-2">Current JSON</div>
-            <div className="p-3 bg-gray-50 rounded-md border border-gray-200 relative">
+          )}
+          
+          {showJson && jsonData && (
+            <div>
+              <div className="text-xs font-medium text-orange-600 mb-2">Current JSON</div>
+              <div className="p-3 bg-white rounded-md border border-orange-200 relative">
               <div className="absolute top-2 right-2 flex gap-2">
                 <button
                   onClick={() => {
@@ -118,7 +125,7 @@ export function ContextPanel({
                       alert('Failed to copy to clipboard')
                     })
                   }}
-                  className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="p-2 bg-white border border-orange-300 rounded hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   title="Copy JSON to clipboard"
                 >
                   {copied ? (
@@ -143,7 +150,7 @@ export function ContextPanel({
                     document.body.removeChild(a)
                     URL.revokeObjectURL(url)
                   }}
-                  className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="p-2 bg-white border border-orange-300 rounded hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   title="Download JSON file"
                 >
                   <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -151,10 +158,11 @@ export function ContextPanel({
                   </svg>
                 </button>
               </div>
-              <pre className="text-xs text-black overflow-auto max-h-64 pr-20">{jsonData}</pre>
+                <pre className="text-xs text-gray-900 overflow-auto max-h-64 pr-20">{jsonData}</pre>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

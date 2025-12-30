@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { ContentParagraph, Citation, AgentVerdict, ValidationVerdict } from "@/types/citation-json"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import { isNewFormatCitationValidation, getCitationRiskLevel } from "@/lib/citation-identification/format-helpers"
+import { getCitationStatusColor, manualReviewColors, badgeStyles, cn } from "@/lib/styles"
 
 interface DocumentReviewPageProps {
   fileId: string
@@ -994,16 +995,9 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
                           const manualReview = citation?.manualReview
                           const isRevalidated = recentlyRevalidated.has(part.citationId)
                           
-                          const statusColors = {
-                            valid: "bg-green-100 text-green-800 border-green-300",
-                            invalid: "bg-red-100 text-red-800 border-red-300",
-                            uncertain: "bg-yellow-100 text-yellow-800 border-yellow-300",
-                            "needs-review": "bg-orange-100 text-orange-800 border-orange-300",
-                          }
-
                           // Use system status color (recheck updates this)
                           // Manual review adds an indicator but doesn't override the system color
-                          let displayColors = statusColors[status]
+                          let displayColors = getCitationStatusColor(status)
                           
                           // Add animation/pulse effect if recently revalidated
                           const animationClass = isRevalidated ? "animate-pulse ring-2 ring-indigo-400" : ""
@@ -1014,7 +1008,7 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
                               className="inline-flex items-center gap-1"
                             >
                               <span
-                                className={`px-1.5 py-0.5 rounded border text-sm font-medium ${displayColors} ${animationClass} transition-all duration-300`}
+                                className={cn(badgeStyles.compact, "border text-sm", displayColors, animationClass, "transition-all duration-300")}
                                 title={`Citation: ${part.text}${manualReview ? ` (Manually ${manualReview.status})` : ''}${isRevalidated ? ' (Just revalidated)' : ''}`}
                               >
                                 {part.text}
@@ -1025,12 +1019,12 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
                                 </span>
                               )}
                               {manualReview?.status === "approved" && (
-                                <span className="text-blue-600" title="Manually approved">
+                                <span className={manualReviewColors.approved} title="Manually approved">
                                   ✓
                                 </span>
                               )}
                               {manualReview?.status === "questionable" && (
-                                <span className="text-purple-600" title="Marked as questionable">
+                                <span className={manualReviewColors.questionable} title="Marked as questionable">
                                   ?
                                 </span>
                               )}
@@ -1381,9 +1375,10 @@ export function DocumentReviewPage({ fileId, checkId: initialCheckId }: Document
           <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-orange-900">Development Test Section</h3>
+                <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+                <p className="text-sm font-medium text-orange-800 mb-2">Download JSON Data</p>
                 <p className="text-sm text-orange-700 mt-1">
-                  Download JSON data for testing and development purposes
+                  Download JSON data for testing and development purposes (not part of final product)
                 </p>
               </div>
               <button

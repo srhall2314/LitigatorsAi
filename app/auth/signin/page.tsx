@@ -5,6 +5,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/Header"
 import { Footer } from "@/components/Footer"
+import { buttonStyles, inputStyles, alertStyles } from "@/lib/styles"
 
 export default function SignInPage() {
   const router = useRouter()
@@ -50,8 +51,8 @@ export default function SignInPage() {
           </div>
           <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
             {error && (
-              <div className="rounded-md bg-red-50 p-4">
-                <p className="text-sm text-red-800">{error}</p>
+              <div className={alertStyles.error}>
+                <p className="text-sm">{error}</p>
               </div>
             )}
             <div className="rounded-md shadow-sm -space-y-px">
@@ -93,7 +94,7 @@ export default function SignInPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                className={buttonStyles.primary + " w-full"}
               >
                 {loading ? "Signing in..." : "Sign in"}
               </button>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { buttonStyles } from "@/lib/styles"
 
 interface RunCitationCheckerPageProps {
   fileId: string
@@ -354,14 +355,14 @@ export function RunCitationCheckerPage({ fileId, checkId: initialCheckId }: RunC
           <button
             onClick={handleRunPipeline}
             disabled={running}
-            className="px-6 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+            className={buttonStyles.primary + " py-3"}
           >
             {running ? 'Running...' : 'Validate Citations'}
           </button>
         ) : progress.stage === 'complete' ? (
           <button
             onClick={() => router.push(`/citation-checker/${fileId}/document-review${progress.checkId ? `?checkId=${progress.checkId}` : ''}`)}
-            className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+            className={buttonStyles.primary + " py-3 bg-green-600 hover:bg-green-700 focus:ring-green-500"}
           >
             Continue to Document Review →
           </button>
@@ -377,7 +378,7 @@ export function RunCitationCheckerPage({ fileId, checkId: initialCheckId }: RunC
               setRunning(false)
               setProgress(prev => ({ ...prev, stage: 'idle', message: '' }))
             }}
-            className="px-6 py-3 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+            className={buttonStyles.secondary + " py-3"}
           >
             Cancel
           </button>

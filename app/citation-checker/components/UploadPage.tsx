@@ -6,6 +6,7 @@ import { FileUpload } from "../types"
 import { AccessIndicator } from "./AccessIndicator"
 import { DocumentSharePanel } from "./DocumentSharePanel"
 import { DocumentRouter } from "./DocumentRouter"
+import { buttonStyles } from "@/lib/styles"
 
 export function UploadPage() {
   const router = useRouter()
@@ -537,7 +538,7 @@ export function UploadPage() {
                           router.push(`/citation-checker/${file.id}/run-citation-checker${checkId ? `?checkId=${checkId}` : ''}`)
                         }}
                         disabled={!checkId}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all whitespace-nowrap"
+                        className={buttonStyles.primary + " text-sm shadow-sm transition-all whitespace-nowrap"}
                       >
                         {status === "citations_validated" ? "Review Citations" : normalWorkflowCheck ? "View Report" : currentStep ? "Continue" : "Validate Citations"}
                       </button>
@@ -550,7 +551,7 @@ export function UploadPage() {
                       <button
                         onClick={(e) => handleDeleteClick(file.id, e)}
                         disabled={deletingFileId === file.id}
-                        className="px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all"
+                        className={buttonStyles.danger + " text-xs shadow-sm transition-all"}
                       >
                         {deletingFileId === file.id ? "Deleting..." : "Delete"}
                       </button>

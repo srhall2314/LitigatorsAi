@@ -1,5 +1,7 @@
 "use client"
 
+import { getRiskLevelColor, cardStyles, cn } from "@/lib/styles"
+
 interface ValidationSummaryProps {
   /**
    * Statistics object with risk-based counts
@@ -46,11 +48,11 @@ export function ValidationSummary({
   const gridCols = variant === 'full' && showTotal ? 'grid-cols-4' : 'grid-cols-3'
 
   return (
-    <div className={`p-4 bg-gray-50 rounded-md ${className}`}>
+    <div className={cn(cardStyles.filled, className)}>
       {title && (
         <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
       )}
-      <div className={`grid ${gridCols} gap-4`}>
+      <div className={cn("grid gap-4", gridCols)}>
         {showTotal && (
           <div>
             <div className="text-sm text-gray-600">Total Validated</div>
@@ -59,15 +61,15 @@ export function ValidationSummary({
         )}
         <div>
           <div className="text-sm text-gray-600">Low Risk</div>
-          <div className="text-2xl font-bold text-green-600">{lowRisk}</div>
+          <div className={cn("text-2xl font-bold", getRiskLevelColor("low"))}>{lowRisk}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600">Moderate Risk</div>
-          <div className="text-2xl font-bold text-yellow-600">{moderateRisk}</div>
+          <div className={cn("text-2xl font-bold", getRiskLevelColor("moderate"))}>{moderateRisk}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600">Needs Review</div>
-          <div className="text-2xl font-bold text-red-600">{needsReview}</div>
+          <div className={cn("text-2xl font-bold", getRiskLevelColor("needs-review"))}>{needsReview}</div>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { buttonStyles, inputStyles, labelStyles, alertStyles, cn } from "@/lib/styles"
 
 export function CreateUserForm() {
   const router = useRouter()
@@ -59,7 +60,7 @@ export function CreateUserForm() {
       <div>
         <label
           htmlFor="email"
-          className="block text-sm font-medium text-black mb-1"
+          className={labelStyles.required}
         >
           Email <span className="text-red-500">*</span>
         </label>
@@ -69,7 +70,7 @@ export function CreateUserForm() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black"
+          className={inputStyles.base}
           placeholder="user@example.com"
         />
       </div>
@@ -77,7 +78,7 @@ export function CreateUserForm() {
       <div>
         <label
           htmlFor="name"
-          className="block text-sm font-medium text-black mb-1"
+          className={labelStyles.base}
         >
           Name
         </label>
@@ -86,7 +87,7 @@ export function CreateUserForm() {
           id="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black"
+          className={inputStyles.base}
           placeholder="User Name"
         />
       </div>
@@ -94,7 +95,7 @@ export function CreateUserForm() {
       <div>
         <label
           htmlFor="password"
-          className="block text-sm font-medium text-black mb-1"
+          className={labelStyles.required}
         >
           Password <span className="text-red-500">*</span>
         </label>
@@ -104,7 +105,7 @@ export function CreateUserForm() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black"
+          className={inputStyles.base}
           placeholder="Enter password"
           minLength={6}
         />
@@ -114,7 +115,7 @@ export function CreateUserForm() {
       <div>
         <label
           htmlFor="role"
-          className="block text-sm font-medium text-black mb-1"
+          className={labelStyles.base}
         >
           Role
         </label>
@@ -122,7 +123,7 @@ export function CreateUserForm() {
           id="role"
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-black"
+          className={inputStyles.base}
         >
           <option value="user">User</option>
           <option value="admin">Admin</option>
@@ -130,13 +131,7 @@ export function CreateUserForm() {
       </div>
 
       {message && (
-        <div
-          className={`rounded-md p-4 ${
-            message.type === "success"
-              ? "bg-green-50 text-green-800"
-              : "bg-red-50 text-red-800"
-          }`}
-        >
+        <div className={message.type === "success" ? alertStyles.success : alertStyles.error}>
           {message.text}
         </div>
       )}
@@ -145,14 +140,14 @@ export function CreateUserForm() {
         <button
           type="button"
           onClick={() => router.push("/admin")}
-          className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-black bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          className={buttonStyles.secondary}
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+          className={buttonStyles.primary}
         >
           {loading ? "Creating..." : "Create User"}
         </button>

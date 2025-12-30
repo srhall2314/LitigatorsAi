@@ -132,7 +132,16 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
       {jsonData ? (
         <div>
           <p className="text-green-600 mb-4">✓ JSON already generated</p>
-          <div className="mt-4 p-4 bg-gray-50 rounded-md relative">
+          <div className="mt-8 border-t-4 border-orange-300 pt-6">
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+                <p className="text-sm font-medium text-orange-800 mb-2">JSON Data</p>
+                <p className="text-sm text-orange-700 mt-1">
+                  JSON data export for development purposes (not part of final product)
+                </p>
+              </div>
+              <div className="bg-white border border-orange-200 rounded-md p-4 relative">
             <div className="absolute top-2 right-2 flex gap-2">
               <button
                 onClick={() => {
@@ -144,7 +153,7 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
                     alert('Failed to copy to clipboard')
                   })
                 }}
-                className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="p-2 bg-white border border-orange-300 rounded hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 title="Copy JSON to clipboard"
               >
                 {copied ? (
@@ -169,7 +178,7 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
                   document.body.removeChild(a)
                   URL.revokeObjectURL(url)
                 }}
-                className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="p-2 bg-white border border-orange-300 rounded hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 title="Download JSON file"
               >
                 <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -177,7 +186,9 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
                 </svg>
               </button>
             </div>
-            <pre className="text-sm text-black overflow-auto max-h-96 pr-20">{jsonData}</pre>
+                <pre className="text-sm text-gray-900 overflow-auto max-h-96 pr-20">{jsonData}</pre>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
@@ -191,7 +202,16 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
           </button>
 
           {jsonData && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-md relative">
+            <div className="mt-8 border-t-4 border-orange-300 pt-6">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+                  <p className="text-sm font-medium text-orange-800 mb-2">JSON Data</p>
+                  <p className="text-sm text-orange-700 mt-1">
+                    JSON data export for development purposes (not part of final product)
+                  </p>
+                </div>
+                <div className="bg-white border border-orange-200 rounded-md p-4 relative">
               <div className="absolute top-2 right-2 flex gap-2">
                 <button
                   onClick={() => {
@@ -203,7 +223,7 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
                       alert('Failed to copy to clipboard')
                     })
                   }}
-                  className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="p-2 bg-white border border-orange-300 rounded hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   title="Copy JSON to clipboard"
                 >
                   {copied ? (
@@ -228,7 +248,7 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
                     document.body.removeChild(a)
                     URL.revokeObjectURL(url)
                   }}
-                  className="p-2 bg-white border border-gray-300 rounded hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="p-2 bg-white border border-orange-300 rounded hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   title="Download JSON file"
                 >
                   <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -236,7 +256,9 @@ export function GenerateJsonPage({ fileId }: GenerateJsonPageProps) {
                   </svg>
                 </button>
               </div>
-              <pre className="text-sm text-black overflow-auto max-h-96 pr-20">{jsonData}</pre>
+                  <pre className="text-sm text-gray-900 overflow-auto max-h-96 pr-20">{jsonData}</pre>
+                </div>
+              </div>
             </div>
           )}
         </>

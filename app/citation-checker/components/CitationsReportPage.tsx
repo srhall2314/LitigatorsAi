@@ -1052,50 +1052,60 @@ export function CitationsReportPage({ fileId, checkId: initialCheckId }: Citatio
           </div>
         )}
 
-        {/* Token Usage and Cost Summary */}
+        {/* Token Usage and Cost Summary - Development Panel */}
         {(tokenUsageSummary.total.total_tokens > 0 || tokenUsageSummary.total.cost > 0) && (
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Token Usage & Estimated Cost</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <div className="text-xs text-gray-600 mb-1">Total Tokens</div>
-                <div className="text-lg font-semibold text-gray-900">
-                  {tokenUsageSummary.total.total_tokens.toLocaleString()}
-                  <span className="text-xs text-gray-500 ml-2">
-                    ({tokenUsageSummary.total.input_tokens.toLocaleString()} in / {tokenUsageSummary.total.output_tokens.toLocaleString()} out)
-                  </span>
+          <div className="mt-8 border-t-4 border-orange-300 pt-6">
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+                <p className="text-sm font-medium text-orange-800 mb-2">Token Usage & Estimated Cost</p>
+                <p className="text-sm text-orange-700 mt-1">
+                  LLM token usage and cost tracking for development purposes (not part of final product)
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <div className="text-xs text-orange-600 font-medium mb-1">Total Tokens</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {tokenUsageSummary.total.total_tokens.toLocaleString()}
+                    <span className="text-xs text-gray-500 ml-2">
+                      ({tokenUsageSummary.total.input_tokens.toLocaleString()} in / {tokenUsageSummary.total.output_tokens.toLocaleString()} out)
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-orange-600 font-medium mb-1">Estimated Cost</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    ${tokenUsageSummary.total.cost.toFixed(4)}
+                    <span className="text-xs text-gray-500 ml-2">USD</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="text-xs text-gray-600 mb-1">Estimated Cost</div>
-                <div className="text-lg font-semibold text-blue-600">
-                  ${tokenUsageSummary.total.cost.toFixed(4)}
-                  <span className="text-xs text-gray-500 ml-2">USD</span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Breakdown by Model */}
-            {Object.keys(tokenUsageSummary.byModel).length > 0 && (
-              <div className="mt-3 pt-3 border-t border-blue-200">
-                <div className="text-xs font-medium text-gray-700 mb-2">Breakdown by Model:</div>
-                <div className="space-y-2">
-                  {Object.entries(tokenUsageSummary.byModel).map(([model, usage]) => (
-                    <div key={model} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600 font-mono">{model}</span>
-                      <div className="flex items-center gap-4">
-                        <span className="text-gray-500">
-                          {usage.total_tokens.toLocaleString()} tokens
-                        </span>
-                        <span className="text-blue-600 font-semibold">
-                          ${usage.cost.toFixed(4)}
-                        </span>
+              
+              {/* Breakdown by Model */}
+              {Object.keys(tokenUsageSummary.byModel).length > 0 && (
+                <div className="mt-4 pt-4 border-t border-orange-200">
+                  <div className="text-sm font-semibold text-orange-900 mb-3">Breakdown by Model</div>
+                  <div className="space-y-2">
+                    {Object.entries(tokenUsageSummary.byModel).map(([model, usage]) => (
+                      <div key={model} className="bg-white border border-orange-200 rounded-md p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-mono text-gray-900">{model}</span>
+                          <div className="flex items-center gap-4">
+                            <span className="text-xs text-gray-600">
+                              {usage.total_tokens.toLocaleString()} tokens
+                            </span>
+                            <span className="text-sm font-semibold text-gray-900">
+                              ${usage.cost.toFixed(4)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 

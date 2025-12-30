@@ -530,49 +530,69 @@ export function TestRunResultsPage({ fileId, testRunId }: TestRunResultsPageProp
 
       {/* Comparison Summary */}
       {data.runs.length > 1 && (
-        <div className="mt-8 p-6 bg-gray-50 border border-gray-200 rounded-lg">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Consistency Analysis
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <div className="text-sm text-gray-600 mb-1">Low Risk Range</div>
-              <div className="text-lg font-semibold text-gray-900">
-                {data.statistics.validRange.min} - {data.statistics.validRange.max}
+        <>
+          <div className="mt-8 p-6 bg-gray-50 border border-gray-200 rounded-lg">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Consistency Analysis
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <div className="text-sm text-gray-600 mb-1">Low Risk Range</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {data.statistics.validRange.min} - {data.statistics.validRange.max}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Avg: {data.statistics.validRange.avg.toFixed(1)}
+                </div>
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Avg: {data.statistics.validRange.avg.toFixed(1)}
+              <div>
+                <div className="text-sm text-gray-600 mb-1">Needs Review Range</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {data.statistics.invalidRange.min} - {data.statistics.invalidRange.max}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Avg: {data.statistics.invalidRange.avg.toFixed(1)}
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600 mb-1">Needs Review Range</div>
-              <div className="text-lg font-semibold text-gray-900">
-                {data.statistics.invalidRange.min} - {data.statistics.invalidRange.max}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Avg: {data.statistics.invalidRange.avg.toFixed(1)}
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600 mb-1">Consistency Score</div>
-              <div className="text-lg font-semibold text-gray-900">
-                {data.statistics.consistency}%
-              </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Higher is better
-              </div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600 mb-1">Total Cost</div>
-              <div className="text-lg font-semibold text-gray-900">
-                ${data.statistics.totalCost.toFixed(4)}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {data.statistics.totalTokens.toLocaleString()} tokens
+              <div>
+                <div className="text-sm text-gray-600 mb-1">Consistency Score</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {data.statistics.consistency}%
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Higher is better
+                </div>
               </div>
             </div>
           </div>
-        </div>
+          
+          {/* Cost & Token Information - Development Panel */}
+          <div className="mt-8 border-t-4 border-orange-300 pt-6">
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-orange-900">Development Panel</h3>
+                <p className="text-sm font-medium text-orange-800 mb-2">Token Usage & Estimated Cost</p>
+                <p className="text-sm text-orange-700 mt-1">
+                  LLM token usage and cost tracking for development purposes (not part of final product)
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-orange-600 font-medium mb-1">Total Tokens</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {data.statistics.totalTokens.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-orange-600 font-medium mb-1">Total Cost</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    ${data.statistics.totalCost.toFixed(4)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Tier 2 Agent-Level Consistency Analysis */}

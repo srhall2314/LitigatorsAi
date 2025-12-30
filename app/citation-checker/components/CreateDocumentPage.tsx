@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
+import { buttonStyles } from "@/lib/styles"
 import { DocumentWizard, DocumentWizardData } from "./DocumentWizard"
 import { buildWizardPrompt } from "@/lib/ai/document-generation"
 // @ts-ignore - diff-match-patch types may not be available
@@ -1070,14 +1071,14 @@ export function CreateDocumentPage() {
                 <button
                   onClick={handleSendMessage}
                   disabled={!currentMessage.trim() || loading}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={buttonStyles.primary + " px-6 py-2"}
                 >
                   Send
                 </button>
                 {chatMessages.length > 0 && (
                   <button
                     onClick={handleClearChat}
-                    className="px-4 py-1.5 text-xs bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    className={buttonStyles.secondary + " px-4 py-1.5 text-xs"}
                     title="Clear chat history"
                   >
                     Clear

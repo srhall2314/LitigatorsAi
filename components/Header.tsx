@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useSession, signOut } from "next-auth/react"
+import { buttonStyles } from "@/lib/styles"
 
 export function Header() {
   const { data: session } = useSession()
@@ -20,33 +21,33 @@ export function Header() {
               <>
                 <Link
                   href="/citation-checker"
-                  className="text-black hover:underline"
+                  className={buttonStyles.link}
                 >
                   Files
                 </Link>
                 <Link
                   href="/citation-checker/cases"
-                  className="text-black hover:underline"
+                  className={buttonStyles.link}
                 >
                   Cases
                 </Link>
                 {session.user.role === "admin" && (
                   <Link
                     href="/admin"
-                    className="text-black hover:underline"
+                    className={buttonStyles.link}
                   >
                     Admin
                   </Link>
                 )}
                 <Link
                   href="/dashboard"
-                  className="text-black hover:underline"
+                  className={buttonStyles.link}
                 >
                   Dashboard
                 </Link>
                 <button
                   onClick={() => signOut()}
-                  className="text-black hover:underline"
+                  className={buttonStyles.link}
                 >
                   Logout
                 </button>
@@ -54,7 +55,7 @@ export function Header() {
             ) : (
               <Link
                 href="/auth/signin"
-                className="text-black hover:underline"
+                className={buttonStyles.link}
               >
                 Login
               </Link>

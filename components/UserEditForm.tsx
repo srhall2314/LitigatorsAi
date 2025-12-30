@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { buttonStyles, inputStyles, labelStyles, alertStyles, cn } from "@/lib/styles"
 
 interface User {
   id: string
@@ -52,7 +53,7 @@ export function UserEditForm({ user }: { user: User }) {
       <div>
         <label
           htmlFor="email"
-          className="block text-sm font-medium text-gray-700"
+          className={labelStyles.base}
         >
           Email
         </label>
@@ -61,7 +62,7 @@ export function UserEditForm({ user }: { user: User }) {
           id="email"
           value={user.email}
           disabled
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm bg-gray-50 text-gray-500"
+          className={cn(inputStyles.base, "bg-gray-50 text-gray-500")}
         />
         <p className="mt-1 text-sm text-gray-500">Email cannot be changed</p>
       </div>
@@ -69,7 +70,7 @@ export function UserEditForm({ user }: { user: User }) {
       <div>
         <label
           htmlFor="name"
-          className="block text-sm font-medium text-gray-700"
+          className={labelStyles.base}
         >
           Name
         </label>
@@ -78,14 +79,14 @@ export function UserEditForm({ user }: { user: User }) {
           id="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          className={inputStyles.base}
         />
       </div>
 
       <div>
         <label
           htmlFor="role"
-          className="block text-sm font-medium text-gray-700"
+          className={labelStyles.base}
         >
           Role
         </label>
@@ -93,7 +94,7 @@ export function UserEditForm({ user }: { user: User }) {
           id="role"
           value={role}
           onChange={(e) => setRole(e.target.value)}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          className={inputStyles.base}
         >
           <option value="user">User</option>
           <option value="admin">Admin</option>
@@ -103,7 +104,7 @@ export function UserEditForm({ user }: { user: User }) {
       <div>
         <label
           htmlFor="password"
-          className="block text-sm font-medium text-gray-700"
+          className={labelStyles.base}
         >
           New Password
         </label>
@@ -112,7 +113,7 @@ export function UserEditForm({ user }: { user: User }) {
           id="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+          className={inputStyles.base}
           placeholder="Leave blank to keep current password"
           minLength={6}
         />
@@ -120,13 +121,7 @@ export function UserEditForm({ user }: { user: User }) {
       </div>
 
       {message && (
-        <div
-          className={`rounded-md p-4 ${
-            message.type === "success"
-              ? "bg-green-50 text-green-800"
-              : "bg-red-50 text-red-800"
-          }`}
-        >
+        <div className={message.type === "success" ? alertStyles.success : alertStyles.error}>
           {message.text}
         </div>
       )}
@@ -135,7 +130,7 @@ export function UserEditForm({ user }: { user: User }) {
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+          className={buttonStyles.primary}
         >
           {loading ? "Saving..." : "Save Changes"}
         </button>
