@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadBlob } from '@/lib/blob';
-import { handleApiError } from '@/lib/api-helpers';
+import { requireAuth, handleApiError } from '@/lib/api-helpers';
 import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
+    // Require authentication
+    const authResult = await requireAuth(request);
+    if (authResult.error) return authResult.error;
+    
     const formData = await request.formData();
     const file = formData.get('file') as File;
 

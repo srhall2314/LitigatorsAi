@@ -3,6 +3,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter"
 import CredentialsProvider from "next-auth/providers/credentials"
 import { prisma } from "./prisma"
 import bcrypt from "bcryptjs"
+import { checkRateLimit } from "./rate-limit"
 // import GoogleProvider from "next-auth/providers/google"
 // import GitHubProvider from "next-auth/providers/github"
 
@@ -17,6 +18,16 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
+          return null
+        }
+
+        // Rate limiting: 5 login attempts per 15 minutes per email
+        const rateLimitKey = `login:${credentials.email.toLowerCase()}`
+        const rateLimit = checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000) // 5 attempts per 15 minutes
+
+        if (!rateLimit.allowed) {
+          // Don't reveal that the account exists, just return null
+          // This prevents email enumeration
           return null
         }
 
@@ -36,6 +47,9 @@ export const authOptions: NextAuthOptions = {
         if (!isPasswordValid) {
           return null
         }
+
+        // Successful login - reset rate limit for this email
+        // (The rate limit will naturally expire, but we could clear it here if needed)
 
         return {
           id: user.id,
