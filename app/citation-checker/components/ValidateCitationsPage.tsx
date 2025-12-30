@@ -205,20 +205,41 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
         
         const job = await response.json()
         
+        console.log('[ValidateCitationsPage] Job progress update:', {
+          tier2: job.tier2Progress,
+          tier3: job.tier3Progress,
+          status: job.status
+        })
+        
+        // Determine stage based on progress
+        let stage: 'tier2' | 'tier3' | 'complete' = 'tier2'
+        if (job.status === 'completed') {
+          stage = 'complete'
+        } else if (job.tier2Progress && job.tier2Progress.current >= job.tier2Progress.total && job.tier3Progress && job.tier3Progress.total > 0) {
+          // Tier 2 is complete, now on Tier 3
+          stage = 'tier3'
+        } else if (job.tier2Progress && job.tier2Progress.current < job.tier2Progress.total) {
+          // Still on Tier 2
+          stage = 'tier2'
+        } else if (job.tier3Progress && job.tier3Progress.total > 0) {
+          // Tier 2 done, Tier 3 in progress
+          stage = 'tier3'
+        }
+        
         setProgress({
-          tier2Current: job.tier2Progress.current,
-          tier2Total: job.tier2Progress.total,
-          tier3Current: job.tier3Progress.current,
-          tier3Total: job.tier3Progress.total,
-          stage: job.tier2Progress.current < job.tier2Progress.total ? 'tier2' : 'tier3',
-          tier2Pending: job.tier2Progress.pending,
-          tier2Processing: job.tier2Progress.processing,
-          tier2Completed: job.tier2Progress.completed,
-          tier2Failed: job.tier2Progress.failed,
-          tier3Pending: job.tier3Progress.pending,
-          tier3Processing: job.tier3Progress.processing,
-          tier3Completed: job.tier3Progress.completed,
-          tier3Failed: job.tier3Progress.failed,
+          tier2Current: job.tier2Progress?.current || 0,
+          tier2Total: job.tier2Progress?.total || 0,
+          tier3Current: job.tier3Progress?.current || 0,
+          tier3Total: job.tier3Progress?.total || 0,
+          stage: stage,
+          tier2Pending: job.tier2Progress?.pending,
+          tier2Processing: job.tier2Progress?.processing,
+          tier2Completed: job.tier2Progress?.completed,
+          tier2Failed: job.tier2Progress?.failed,
+          tier3Pending: job.tier3Progress?.pending,
+          tier3Processing: job.tier3Progress?.processing,
+          tier3Completed: job.tier3Progress?.completed,
+          tier3Failed: job.tier3Progress?.failed,
           jobStatus: job.status,
         })
         
