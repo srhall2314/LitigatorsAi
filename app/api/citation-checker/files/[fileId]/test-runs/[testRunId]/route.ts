@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import { getCitationRiskLevel } from "@/lib/citation-identification/format-helpers"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(
   request: NextRequest,
@@ -11,19 +11,10 @@ export async function GET(
 ) {
   try {
     const { fileId, testRunId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get all citation checks for this file
     // Use findMany with full jsonData to ensure we get the latest updates
@@ -52,10 +43,10 @@ export async function GET(
       // Use workflowId from database if available
       if (check.workflowType === "test_run" && check.workflowId === testRunId) {
         const metadata = check.workflowMetadata as any
-        console.log(`[test-runs] Found test run check: ${check.id}, version: ${check.version}, testRunNumber: ${metadata?.testRunNumber}`)
+        logger.debug(`Found test run check`, { checkId: check.id, version: check.version, testRunNumber: metadata?.testRunNumber }, 'TestRuns')
         const citations = (check.jsonData as any)?.document?.citations || []
         const citationsWithValidation = citations.filter((c: any) => c.validation).length
-        console.log(`[test-runs] Check ${check.id} has ${citationsWithValidation}/${citations.length} citations with validation`)
+        logger.debug(`Check citations with validation`, { checkId: check.id, citationsWithValidation, totalCitations: citations.length }, 'TestRuns')
         return true
       }
       
@@ -64,10 +55,10 @@ export async function GET(
       const metadata = jsonData?.document?.metadata
       const matches = metadata?.testRunId === testRunId
       if (matches) {
-        console.log(`[test-runs] Found test run check (from jsonData): ${check.id}, version: ${check.version}, testRunNumber: ${metadata?.testRunNumber}`)
+        logger.debug(`Found test run check (from jsonData)`, { checkId: check.id, version: check.version, testRunNumber: metadata?.testRunNumber }, 'TestRuns')
         const citations = jsonData?.document?.citations || []
         const citationsWithValidation = citations.filter((c: any) => c.validation).length
-        console.log(`[test-runs] Check ${check.id} has ${citationsWithValidation}/${citations.length} citations with validation`)
+        logger.debug(`Check citations with validation`, { checkId: check.id, citationsWithValidation, totalCitations: citations.length }, 'TestRuns')
       }
       return matches
     })
@@ -119,11 +110,11 @@ export async function GET(
             uncertainCount++
           } else if (riskLevel === null) {
             // This shouldn't happen if validation exists, but handle it
-            console.warn(`[test-runs] Run ${runNumber}: Citation ${citation.id} has validation but getCitationRiskLevel returned null`)
+            logger.warn(`Citation has validation but getCitationRiskLevel returned null`, { runNumber, citationId: citation.id }, 'TestRuns')
             uncertainCount++ // Count as MODERATE_RISK
           } else {
             // Unknown risk level - log warning and count as MODERATE_RISK
-            console.warn(`[test-runs] Run ${runNumber}: Unknown risk level for citation ${citation.id}: ${riskLevel}`)
+            logger.warn(`Unknown risk level for citation`, { runNumber, citationId: citation.id, riskLevel }, 'TestRuns')
             uncertainCount++
           }
           
@@ -161,12 +152,12 @@ export async function GET(
       // Verify counts match - all validated citations should be counted
       const sumOfRisks = validCount + invalidCount + uncertainCount
       if (sumOfRisks !== totalValidatedCount) {
-        console.error(`[test-runs] Run ${runNumber}: CRITICAL - Risk count mismatch! sum=${sumOfRisks}, validated=${totalValidatedCount}, total=${citations.length}`)
+        logger.error(`CRITICAL - Risk count mismatch`, { runNumber, sumOfRisks, totalValidatedCount, totalCitations: citations.length }, 'TestRuns')
         // This should never happen - if it does, there's a bug in getCitationRiskLevel or the counting logic
         // For now, we'll add the missing citations to uncertainCount to make the numbers match
         const missing = totalValidatedCount - sumOfRisks
         if (missing > 0) {
-          console.error(`[test-runs] Run ${runNumber}: Adding ${missing} missing citations to uncertainCount`)
+          logger.error(`Adding missing citations to uncertainCount`, { runNumber, missing }, 'TestRuns')
           uncertainCount += missing
         }
       }
@@ -424,14 +415,7 @@ export async function GET(
       tier3AgentConsistency: tier3AgentConsistency,
     })
   } catch (error) {
-    console.error("Error fetching test run:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetTestRun')
   }
 }
 

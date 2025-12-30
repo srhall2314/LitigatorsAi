@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { validateCitationWithPanel, validateCitationTier3 } from "@/lib/citation-identification/validation"
 import { extractDocumentContext } from "@/lib/citation-identification/context-extractor"
 import { ANTHROPIC_API_KEY } from "@/lib/env"
 import { CitationDocument, Citation } from "@/types/citation-json"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -13,25 +13,16 @@ export async function POST(
 ) {
   try {
     const { id, citationId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     if (!ANTHROPIC_API_KEY) {
       return NextResponse.json(
         { error: "Anthropic API key not configured" },
         { status: 500 }
       )
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
     // Load CitationCheck by checkId
@@ -122,17 +113,7 @@ export async function POST(
       checkId: updated.id,
     })
   } catch (error) {
-    console.error("Error reprocessing citation:", error)
-    if (error instanceof Error) {
-      console.error("Error details:", error.message, error.stack)
-    }
-    return NextResponse.json(
-      { 
-        error: "Failed to reprocess citation",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'RevalidateCitation')
   }
 }
 

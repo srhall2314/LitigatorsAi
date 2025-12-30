@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import retry from 'async-retry'
 import { CitationDocument, Citation, HeavyAnalysisResult, HeavyAnalysisRiskLevel } from '@/types/citation-json'
 import { extractTokens, calculateCost, TokenUsage, Provider } from './token-tracking'
+import { logger } from '@/lib/logger'
 // Import types only (not the implementation) to avoid webpack chunking issues
 import type OpenAI from 'openai'
 
@@ -150,10 +151,12 @@ function parseHeavyAnalysisResponse(
   try {
     parsed = JSON.parse(jsonText)
   } catch (error) {
-    console.error('[HeavyAnalysis] JSON parse error:', error)
-    console.error('[HeavyAnalysis] JSON text length:', jsonText.length)
-    console.error('[HeavyAnalysis] JSON text preview (first 500):', jsonText.substring(0, 500))
-    console.error('[HeavyAnalysis] JSON text preview (last 500):', jsonText.substring(Math.max(0, jsonText.length - 500)))
+    logger.error('JSON parse error', error, 'HeavyAnalysis')
+    logger.error('JSON text details', {
+      length: jsonText.length,
+      previewFirst: jsonText.substring(0, 500),
+      previewLast: jsonText.substring(Math.max(0, jsonText.length - 500)),
+    }, 'HeavyAnalysis')
     
     // Check if JSON appears truncated (common when hitting token limits)
     const openBraces = (jsonText.match(/{/g) || []).length
@@ -177,21 +180,21 @@ function parseHeavyAnalysisResponse(
   // Validate and map results
   for (const result of parsed.citations) {
     if (!result.id) {
-      console.warn('[HeavyAnalysis] Result missing id:', result)
+      logger.warn('Result missing id', result, 'HeavyAnalysis')
       continue
     }
     
     // Verify citation exists
     const citation = citations.find(c => c.id === result.id)
     if (!citation) {
-      console.warn(`[HeavyAnalysis] Result for unknown citation ID: ${result.id}`)
+      logger.warn(`Result for unknown citation ID: ${result.id}`, undefined, 'HeavyAnalysis')
       continue
     }
     
     // Validate risk level
     const riskLevel = result.riskLevel
     if (!riskLevel || !['Low Risk', 'Medium Risk', 'human review'].includes(riskLevel)) {
-      console.warn(`[HeavyAnalysis] Invalid risk level for ${result.id}: ${riskLevel}, defaulting to "human review"`)
+      logger.warn(`Invalid risk level for ${result.id}, defaulting to "human review"`, { citationId: result.id, riskLevel }, 'HeavyAnalysis')
       result.riskLevel = 'human review'
     }
     
@@ -210,7 +213,7 @@ function parseHeavyAnalysisResponse(
     .filter(id => !resultIds.has(id))
   
   if (missingIds.length > 0) {
-    console.warn(`[HeavyAnalysis] Missing results for ${missingIds.length} citations:`, missingIds)
+    logger.warn(`Missing results for ${missingIds.length} citations`, { missingIds, count: missingIds.length }, 'HeavyAnalysis')
     
     // Add default results for missing citations
     for (const missingId of missingIds) {
@@ -287,7 +290,7 @@ async function callOpenAI(
   
   const openai = new OpenAI({ apiKey, baseURL })
   
-  console.log(`[callOpenAI] Calling ${isGrok ? 'Grok' : 'OpenAI'} API with model: ${model}, baseURL: ${baseURL || 'default'}`)
+  logger.debug(`Calling ${isGrok ? 'Grok' : 'OpenAI'} API`, { model, baseURL: baseURL || 'default' }, 'HeavyAnalysis')
   
   // GPT-5.1 models require 'max_completion_tokens' instead of 'max_tokens'
   const isGPT51 = model.startsWith('gpt-5.1')
@@ -313,7 +316,7 @@ async function callOpenAI(
         // Check for deprecated model errors
         if (error?.message?.includes('deprecated') || error?.message?.includes('grok-beta')) {
           const errorMsg = error.message || String(error)
-          console.error(`[callOpenAI] Deprecated model error: ${errorMsg}`)
+          logger.error('Deprecated model error', error, 'HeavyAnalysis')
           bail(new Error(`Model ${model} is deprecated. Please use one of: ${GROK_MODELS.join(', ')}`))
           throw error
         }
@@ -418,15 +421,15 @@ export async function runHeavyAnalysis(
   const citations = jsonData.document.citations || []
   
   if (citations.length === 0) {
-    console.log('[HeavyAnalysis] No citations to analyze')
+    logger.debug('No citations to analyze', undefined, 'HeavyAnalysis')
     return jsonData
   }
 
-  console.log(`[HeavyAnalysis] Starting analysis for ${citations.length} citations using ${provider}/${model}`)
+  logger.debug(`Starting analysis for ${citations.length} citations`, { provider, model, citationCount: citations.length }, 'HeavyAnalysis')
 
   // Extract full document text
   const documentText = extractFullDocumentText(jsonData)
-  console.log(`[HeavyAnalysis] Document text length: ${documentText.length} characters`)
+  logger.debug(`Document text extracted`, { length: documentText.length }, 'HeavyAnalysis')
   
   // Build prompt
   const prompt = buildHeavyAnalysisPrompt(documentText, citations, basePrompt)
@@ -449,7 +452,7 @@ export async function runHeavyAnalysis(
     const isGPT51 = model.startsWith('gpt-5.1')
     if (isGPT51) {
       maxOutputTokens = 65536 // GPT-5.1 maximum (64k)
-      console.log(`[HeavyAnalysis] Using GPT-5.1 with 64k output token limit`)
+      logger.debug('Using GPT-5.1 with 64k output token limit', undefined, 'HeavyAnalysis')
     } else {
       maxOutputTokens = 16384 // GPT-4 maximum
     }
@@ -462,7 +465,7 @@ export async function runHeavyAnalysis(
     const isGemini3Pro = model.includes('gemini-3-pro') || model.startsWith('gemini-3')
     if (isGemini3Pro) {
       maxOutputTokens = 65536 // Gemini 3 Pro maximum (64k)
-      console.log(`[HeavyAnalysis] Using Gemini 3 Pro with 64k output token limit`)
+      logger.debug('Using Gemini 3 Pro with 64k output token limit', undefined, 'HeavyAnalysis')
     } else {
       maxOutputTokens = 8192 // Other Gemini models maximum
     }
@@ -470,7 +473,12 @@ export async function runHeavyAnalysis(
     maxOutputTokens = 8192 // Default fallback
   }
   
-  console.log(`[HeavyAnalysis] Estimated input tokens: ${estimatedInputTokens}, Max output tokens: ${maxOutputTokens} (provider: ${provider}, citations: ${citations.length})`)
+  logger.debug('Token estimation', {
+    estimatedInputTokens,
+    maxOutputTokens,
+    provider,
+    citationCount: citations.length,
+  }, 'HeavyAnalysis')
 
   // Call appropriate provider
   let responseText: string
@@ -489,10 +497,10 @@ export async function runHeavyAnalysis(
       // Grok uses OpenAI-compatible API but with different base URL
       // Verify model is a valid Grok model
       if (!GROK_MODELS.includes(model)) {
-        console.error(`[HeavyAnalysis] Invalid Grok model: ${model}. Valid models: ${GROK_MODELS.join(', ')}`)
+        logger.error(`Invalid Grok model: ${model}`, { model, validModels: GROK_MODELS }, 'HeavyAnalysis')
         throw new Error(`Invalid Grok model: ${model}. Please use one of: ${GROK_MODELS.join(', ')}`)
       }
-      console.log(`[HeavyAnalysis] Calling Grok API with model: ${model}`)
+      logger.debug('Calling Grok API', { model }, 'HeavyAnalysis')
       const result = await callOpenAI(prompt, model, apiKey, maxOutputTokens, true)
       responseText = result.responseText
       tokenUsage = result.tokenUsage
@@ -504,7 +512,7 @@ export async function runHeavyAnalysis(
       throw new Error(`Unsupported provider: ${provider}`)
     }
   } catch (error) {
-    console.error('[HeavyAnalysis] Failed after retries:', error)
+    logger.error('Failed after retries', error, 'HeavyAnalysis')
     throw new Error(`Heavy analysis failed: ${error instanceof Error ? error.message : String(error)}`)
   }
 
@@ -512,13 +520,17 @@ export async function runHeavyAnalysis(
   const cost = tokenUsage ? calculateCost(tokenUsage) : undefined
 
   if (tokenUsage) {
-    console.log(`[HeavyAnalysis] Token usage: ${tokenUsage.input_tokens} input, ${tokenUsage.output_tokens} output, total: ${tokenUsage.total_tokens}`)
+    logger.debug('Token usage', {
+      input_tokens: tokenUsage.input_tokens,
+      output_tokens: tokenUsage.output_tokens,
+      total_tokens: tokenUsage.total_tokens,
+    }, 'HeavyAnalysis')
   }
   if (cost) {
-    console.log(`[HeavyAnalysis] Cost: $${cost.total_cost.toFixed(4)}`)
+    logger.debug('Cost calculation', { total_cost: cost.total_cost }, 'HeavyAnalysis')
   }
 
-  console.log(`[HeavyAnalysis] Response length: ${responseText.length} characters`)
+  logger.debug('Response received', { length: responseText.length }, 'HeavyAnalysis')
 
   // Check if response might be truncated (common with token limits)
   // Check for empty response or response that doesn't end properly
@@ -527,10 +539,16 @@ export async function runHeavyAnalysis(
   
   if (tokenUsage && tokenUsage.output_tokens >= maxOutputTokens * 0.95) {
     if (isEmpty) {
-      console.warn(`[HeavyAnalysis] Response is empty - output tokens (${tokenUsage.output_tokens}) hit limit (${maxOutputTokens})`)
+      logger.warn('Response is empty - output tokens hit limit', {
+        output_tokens: tokenUsage.output_tokens,
+        limit: maxOutputTokens,
+      }, 'HeavyAnalysis')
       throw new Error(`Response was completely truncated due to token limit. The model output ${tokenUsage.output_tokens} tokens (limit: ${maxOutputTokens}). Consider using a model with higher output limits (e.g., Gemini 3 Pro supports 64k tokens) or reducing the number of citations analyzed at once.`)
     } else if (responseEndsAbruptly) {
-      console.warn(`[HeavyAnalysis] Response may be truncated - output tokens (${tokenUsage.output_tokens}) near limit (${maxOutputTokens})`)
+      logger.warn('Response may be truncated - output tokens near limit', {
+        output_tokens: tokenUsage.output_tokens,
+        limit: maxOutputTokens,
+      }, 'HeavyAnalysis')
       throw new Error(`Response was truncated due to token limit. The model output ${tokenUsage.output_tokens} tokens (limit: ${maxOutputTokens}). Consider using a model with higher output limits (e.g., Gemini 3 Pro supports 64k tokens) or reducing the number of citations analyzed at once.`)
     }
   }
@@ -540,10 +558,12 @@ export async function runHeavyAnalysis(
   try {
     analysisResults = parseHeavyAnalysisResponse(responseText, citations)
   } catch (error) {
-    console.error('[HeavyAnalysis] Failed to parse response:', error)
-    console.error('[HeavyAnalysis] Response length:', responseText.length, 'characters')
-    console.error('[HeavyAnalysis] Response preview (first 1000 chars):', responseText.substring(0, 1000))
-    console.error('[HeavyAnalysis] Response preview (last 500 chars):', responseText.substring(Math.max(0, responseText.length - 500)))
+    logger.error('Failed to parse response', error, 'HeavyAnalysis')
+    logger.error('Response details', {
+      length: responseText.length,
+      previewFirst: responseText.substring(0, 1000),
+      previewLast: responseText.substring(Math.max(0, responseText.length - 500)),
+    }, 'HeavyAnalysis')
     
     // Check if it's a truncation issue
     if (tokenUsage && tokenUsage.output_tokens >= maxOutputTokens * 0.9) {
@@ -553,7 +573,7 @@ export async function runHeavyAnalysis(
     throw new Error(`Failed to parse heavy analysis response: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  console.log(`[HeavyAnalysis] Parsed ${analysisResults.size} citation results`)
+  logger.debug(`Parsed ${analysisResults.size} citation results`, { resultCount: analysisResults.size }, 'HeavyAnalysis')
 
   // Update citations with heavy analysis results
   const updatedCitations = citations.map(citation => {

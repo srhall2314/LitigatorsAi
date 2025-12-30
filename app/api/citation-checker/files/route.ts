@@ -1,25 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { uploadBlob } from "@/lib/blob"
 import { getAccessibleFilesWhere, getFileAccessLevel } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Filter files by access control - users see only their files and shared files
     // Exclude jsonData to improve performance - it's huge and not needed for the list view
@@ -255,41 +245,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(serializedFiles)
   } catch (error) {
-    console.error("Error fetching files:", error)
-    // Log full error for debugging
-    if (error instanceof Error) {
-      console.error("Error name:", error.name)
-      console.error("Error message:", error.message)
-      console.error("Error stack:", error.stack)
-    } else {
-      console.error("Non-Error object:", JSON.stringify(error, null, 2))
-    }
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetFiles')
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const formData = await request.formData()
     const file = formData.get("file") as File
@@ -381,18 +345,7 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error("Error uploading file:", error)
-    // Log full error for debugging
-    if (error instanceof Error) {
-      console.error("Upload error details:", error.message, error.stack)
-    }
-    return NextResponse.json(
-      { 
-        error: "Failed to upload file",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'UploadFile')
   }
 }
 

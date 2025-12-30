@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 // GET: Fetch all prompts for the current user
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const prompts = await prisma.savedPrompt.findMany({
       where: { userId: user.id },
@@ -40,33 +30,16 @@ export async function GET(request: NextRequest) {
       })),
     })
   } catch (error) {
-    console.error("Error fetching prompts:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to fetch prompts",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetPrompts')
   }
 }
 
 // POST: Create a new prompt
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const body = await request.json()
     const { name, prompt, isDefault } = body
@@ -104,33 +77,16 @@ export async function POST(request: NextRequest) {
       updatedAt: savedPrompt.updatedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error creating prompt:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to create prompt",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'CreatePrompt')
   }
 }
 
 // PUT: Update an existing prompt
 export async function PUT(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const body = await request.json()
     const { id, name, prompt, isDefault } = body
@@ -207,33 +163,16 @@ export async function PUT(request: NextRequest) {
       updatedAt: updatedPrompt.updatedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error updating prompt:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to update prompt",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'UpdatePrompt')
   }
 }
 
 // DELETE: Delete a prompt
 export async function DELETE(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
@@ -271,14 +210,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Error deleting prompt:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to delete prompt",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'DeletePrompt')
   }
 }
 

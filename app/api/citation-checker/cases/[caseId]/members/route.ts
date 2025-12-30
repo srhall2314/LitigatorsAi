@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessCase } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(
   request: NextRequest,
@@ -10,19 +10,10 @@ export async function GET(
 ) {
   try {
     const { caseId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access
     const hasAccess = await canAccessCase(user.id, caseId, "view")
@@ -58,11 +49,7 @@ export async function GET(
       addedAt: member.addedAt.toISOString(),
     })))
   } catch (error) {
-    console.error("Error fetching case members:", error)
-    return NextResponse.json(
-      { error: "Failed to fetch case members" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetCaseMembers')
   }
 }
 
@@ -72,19 +59,10 @@ export async function POST(
 ) {
   try {
     const { caseId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access - need edit permission to add members
     const hasAccess = await canAccessCase(user.id, caseId, "edit")
@@ -163,11 +141,7 @@ export async function POST(
       addedAt: member.addedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error adding case member:", error)
-    return NextResponse.json(
-      { error: "Failed to add case member" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'AddCaseMember')
   }
 }
 

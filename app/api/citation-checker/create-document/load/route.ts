@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAuth, handleApiError, getLatestCheck } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const { searchParams } = new URL(request.url)
     const fileId = searchParams.get('fileId')
@@ -44,10 +34,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if document has already entered citation workflow
-    const latestCheck = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: fileId },
-      orderBy: { version: 'desc' },
-    })
+    const latestCheck = await getLatestCheck(fileId)
 
     // If document has jsonData, extract text from it instead of blocking
     if (latestCheck?.jsonData) {
@@ -114,17 +101,7 @@ export async function GET(request: NextRequest) {
       updatedAt: fileUpload.updatedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error loading document:", error)
-    if (error instanceof Error) {
-      console.error("Load error details:", error.message, error.stack)
-    }
-    return NextResponse.json(
-      { 
-        error: "Failed to load document",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'LoadDocument')
   }
 }
 

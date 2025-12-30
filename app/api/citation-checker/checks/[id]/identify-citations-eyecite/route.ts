@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { identifyCitationsEyecite } from "@/lib/citation-identification/eyecite-adapter"
+import { requireAuth, handleApiError, getNextVersionNumber } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -10,19 +10,10 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get the current CitationCheck
     const currentCheck = await prisma.citationCheck.findUnique({
@@ -59,12 +50,7 @@ export async function POST(
     }
 
     // Get the latest version for this fileUploadId to determine next version number
-    const latestVersion = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: currentCheck.fileUploadId },
-      orderBy: { version: "desc" },
-    })
-
-    const nextVersion = latestVersion ? latestVersion.version + 1 : 1
+    const nextVersion = await getNextVersionNumber(currentCheck.fileUploadId)
 
     // Create new version by copying jsonData from base version (unprocessed JSON)
     // Inherit workflow fields from source check
@@ -89,25 +75,22 @@ export async function POST(
     // Process citations using Eyecite and update jsonData
     // Use the base version's jsonData which should have no citation markers
     const jsonData = sourceCheck.jsonData as any
-    console.log('[Eyecite API] Input jsonData structure:', {
+    logger.debug('Input jsonData structure', {
       hasDocument: !!jsonData?.document,
       hasContent: !!jsonData?.document?.content,
       contentLength: jsonData?.document?.content?.length,
-    })
+    }, 'EyeciteAPI')
     
     let result
     try {
       result = identifyCitationsEyecite(jsonData)
-      console.log('[Eyecite API] Result structure:', {
+      logger.debug('Result structure', {
         hasDocument: !!result?.document,
         hasLogs: Array.isArray(result?.logs),
         logsLength: result?.logs?.length,
-      })
+      }, 'EyeciteAPI')
     } catch (error) {
-      console.error('[Eyecite API] Error in identifyCitationsEyecite:', error)
-      if (error instanceof Error) {
-        console.error('[Eyecite API] Error stack:', error.stack)
-      }
+      logger.error('Error in identifyCitationsEyecite', error, 'EyeciteAPI')
       throw error
     }
     
@@ -115,8 +98,10 @@ export async function POST(
     
     // updatedJsonData is a CitationDocument, which has a document property
     // We need to store the full CitationDocument structure
-    console.log('[Eyecite API] updatedJsonData type:', typeof updatedJsonData)
-    console.log('[Eyecite API] updatedJsonData has document property:', 'document' in updatedJsonData)
+    logger.debug('updatedJsonData structure', {
+      type: typeof updatedJsonData,
+      hasDocumentProperty: 'document' in updatedJsonData,
+    }, 'EyeciteAPI')
 
     // Update version with citations
     const updated = await prisma.citationCheck.update({
@@ -132,7 +117,7 @@ export async function POST(
       const { syncWorkflowFields } = await import("@/lib/workflow/workflow-utils")
       await syncWorkflowFields(prisma, newVersion.id)
     } catch (syncError) {
-      console.warn("[Eyecite API] Failed to sync workflow fields:", syncError)
+      logger.warn("Failed to sync workflow fields", syncError, 'EyeciteAPI')
       // Don't fail the request if sync fails
     }
 
@@ -142,27 +127,7 @@ export async function POST(
       logs, // Include logs for browser console
     })
   } catch (error) {
-    console.error("[Eyecite API] Error identifying citations with Eyecite:", error)
-    if (error instanceof Error) {
-      console.error("[Eyecite API] Error name:", error.name)
-      console.error("[Eyecite API] Error message:", error.message)
-      console.error("[Eyecite API] Error stack:", error.stack)
-    } else {
-      console.error("[Eyecite API] Non-Error object:", JSON.stringify(error, null, 2))
-    }
-    
-    const errorMessage = error instanceof Error 
-      ? `${error.name}: ${error.message}` 
-      : String(error)
-    
-    return NextResponse.json(
-      { 
-        error: "Failed to identify citations with Eyecite",
-        details: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'EyeciteAPI')
   }
 }
 

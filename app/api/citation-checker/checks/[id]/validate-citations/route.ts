@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { createValidationJob, retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-identification/queue"
 import { ANTHROPIC_API_KEY } from "@/lib/env"
 import { CitationDocument } from "@/types/citation-json"
 import { canModifyWorkflow } from "@/lib/access-control"
+import { requireAuth, handleApiError, getNextVersionNumber } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
+import { deepClone } from "@/lib/utils"
 
 export async function POST(
   request: NextRequest,
@@ -13,12 +14,12 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    console.log(`[validate-citations] POST request received for checkId: ${id}`)
-    console.log(`[validate-citations] Processing validation job creation for checkId: ${id}`)
+    logger.debug(`POST request received for checkId`, { checkId: id }, 'ValidateCitations')
+    logger.debug(`Processing validation job creation`, { checkId: id }, 'ValidateCitations')
 
     // Validate prisma is initialized
     if (!prisma) {
-      console.error("[validate-citations] Prisma client is not initialized")
+      logger.error("Prisma client is not initialized", undefined, 'ValidateCitations')
       return NextResponse.json(
         { error: "Database connection error" },
         { status: 500 }
@@ -27,33 +28,23 @@ export async function POST(
 
     // Debug: Check if validationJob model exists
     if (!prisma.validationJob) {
-      console.error("[validate-citations] prisma.validationJob is undefined")
-      console.error("[validate-citations] Available models:", Object.keys(prisma).filter(key => !key.startsWith('$') && !key.startsWith('_')))
+      logger.error("prisma.validationJob is undefined", undefined, 'ValidateCitations')
+      logger.error("Available models", { models: Object.keys(prisma).filter(key => !key.startsWith('$') && !key.startsWith('_')) }, 'ValidateCitations')
       return NextResponse.json(
         { error: "Database model not available. Please restart the server." },
         { status: 500 }
       )
     }
 
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     if (!ANTHROPIC_API_KEY) {
       return NextResponse.json(
         { error: "Anthropic API key not configured" },
         { status: 500 }
       )
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
     // Get the current CitationCheck
@@ -83,7 +74,7 @@ export async function POST(
     try {
       jsonData = currentCheck.jsonData as unknown as CitationDocument
     } catch (error) {
-      console.error("Error casting jsonData:", error)
+      logger.error("Error casting jsonData", error, 'ValidateCitations')
       return NextResponse.json(
         { error: "Invalid JSON data format" },
         { status: 400 }
@@ -92,7 +83,7 @@ export async function POST(
 
     // Validate jsonData structure
     if (!jsonData || typeof jsonData !== 'object') {
-      console.error("Invalid jsonData structure:", typeof jsonData, jsonData)
+      logger.error("Invalid jsonData structure", { type: typeof jsonData, data: jsonData }, 'ValidateCitations')
       return NextResponse.json(
         { error: "Invalid JSON data structure" },
         { status: 400 }
@@ -100,7 +91,7 @@ export async function POST(
     }
 
     if (!jsonData.document) {
-      console.error("Missing document in jsonData:", Object.keys(jsonData))
+      logger.error("Missing document in jsonData", { keys: Object.keys(jsonData) }, 'ValidateCitations')
       return NextResponse.json(
         { error: "JSON data missing document structure" },
         { status: 400 }
@@ -108,7 +99,7 @@ export async function POST(
     }
 
     if (!jsonData.document.citations || !Array.isArray(jsonData.document.citations)) {
-      console.error("Invalid citations array:", jsonData.document.citations)
+      logger.error("Invalid citations array", { citations: jsonData.document.citations }, 'ValidateCitations')
       return NextResponse.json(
         { error: "Invalid citations array in JSON data" },
         { status: 400 }
@@ -127,7 +118,7 @@ export async function POST(
     const forceRerun = searchParams.get('force') === 'true' || searchParams.get('rerun') === 'true'
     
     // Check if job already exists
-    console.log(`[validate-citations] Checking for existing job for checkId: ${id}, forceRerun: ${forceRerun}`)
+    logger.debug(`Checking for existing job`, { checkId: id, forceRerun }, 'ValidateCitations')
     const existingJob = await prisma.validationJob.findUnique({
       where: { checkId: id },
     })
@@ -138,19 +129,14 @@ export async function POST(
     if (existingJob) {
       if (forceRerun) {
         // Create a new CitationCheck version for rerun (to preserve history)
-        console.log(`[validate-citations] Force rerun requested, creating new CitationCheck version`)
+        logger.debug(`Force rerun requested, creating new CitationCheck version`, undefined, 'ValidateCitations')
         
         // Get the latest version for this fileUploadId to determine next version number
-        const latestVersion = await prisma.citationCheck.findFirst({
-          where: { fileUploadId: currentCheck.fileUploadId },
-          orderBy: { version: "desc" },
-        })
-
-        const nextVersion = latestVersion ? latestVersion.version + 1 : 1
+        const nextVersion = await getNextVersionNumber(currentCheck.fileUploadId)
 
         // Copy jsonData but clear ALL validation results for fresh validation
         // Start with clean Tier 1 citation data only
-        const freshJsonData = JSON.parse(JSON.stringify(jsonData)) as CitationDocument
+        const freshJsonData = deepClone(jsonData)
         if (freshJsonData.document?.citations) {
           freshJsonData.document.citations = freshJsonData.document.citations.map((citation: any) => {
             // Create clean citation object with only Tier 1 fields
@@ -181,27 +167,27 @@ export async function POST(
           },
         })
 
-        console.log(`[validate-citations] Created new CitationCheck version: ${newCheck.id} (version ${nextVersion})`)
+        logger.debug(`Created new CitationCheck version`, { checkId: newCheck.id, version: nextVersion }, 'ValidateCitations')
         checkIdToUse = newCheck.id
         jsonDataToUse = freshJsonData
 
         // Delete existing job and all its queue items
-        console.log(`[validate-citations] Deleting existing job: ${existingJob.id}`)
+        logger.debug(`Deleting existing job`, { jobId: existingJob.id }, 'ValidateCitations')
         await prisma.validationQueueItem.deleteMany({
           where: { jobId: existingJob.id },
         })
         await prisma.validationJob.delete({
           where: { id: existingJob.id },
         })
-        console.log(`[validate-citations] Existing job deleted, will create new one for new check`)
+        logger.debug(`Existing job deleted, will create new one for new check`, undefined, 'ValidateCitations')
       } else {
         // Return existing job (original behavior)
-        console.log(`[validate-citations] Existing job found: ${existingJob.id}, status: ${existingJob.status}`)
+        logger.debug(`Existing job found`, { jobId: existingJob.id, status: existingJob.status }, 'ValidateCitations')
         
         // Check for unvalidated citations and retry them (up to 3 times)
         const retriedCount = await retryUnvalidatedCitations(existingJob.id)
         if (retriedCount > 0) {
-          console.log(`[validate-citations] Retried ${retriedCount} unvalidated citations for job ${existingJob.id}`)
+          logger.info(`Retried unvalidated citations`, { count: retriedCount, jobId: existingJob.id }, 'ValidateCitations')
           // Re-check job completion after retries
           await checkJobCompletion(existingJob.id)
         }
@@ -214,22 +200,22 @@ export async function POST(
           },
         })
         
-        console.log(`[validate-citations] Pending queue items: ${pendingItems}`)
+        logger.debug(`Pending queue items`, { count: pendingItems }, 'ValidateCitations')
         
         // If there are pending items, trigger worker to process them
         if (pendingItems > 0) {
-          console.log(`[validate-citations] Triggering worker to process ${pendingItems} pending items`)
+          logger.debug(`Triggering worker to process pending items`, { count: pendingItems }, 'ValidateCitations')
           try {
             const { processQueueItems } = await import("@/lib/citation-identification/worker")
             processQueueItems(5)
               .then((result) => {
-                console.log(`[validate-citations] Worker processed ${result.processed} items for existing job`)
+                logger.debug(`Worker processed items for existing job`, { processed: result.processed }, 'ValidateCitations')
               })
               .catch((err) => {
-                console.error("[validate-citations] Error processing existing job:", err)
+                logger.error("Error processing existing job", err, 'ValidateCitations')
               })
           } catch (err) {
-            console.error("[validate-citations] Error starting worker for existing job:", err)
+            logger.error("Error starting worker for existing job", err, 'ValidateCitations')
           }
         }
         
@@ -242,13 +228,12 @@ export async function POST(
       }
     }
     
-    console.log(`[validate-citations] No existing job found, creating new one`)
+    logger.debug(`No existing job found, creating new one`, undefined, 'ValidateCitations')
 
     // Create validation job and queue items
     let jobId: string
     try {
-      console.log(`[validate-citations] Creating validation job for checkId: ${checkIdToUse}`)
-      console.log(`[validate-citations] Citations count: ${jsonDataToUse.document.citations.length}`)
+      logger.debug(`Creating validation job`, { checkId: checkIdToUse, citationsCount: jsonDataToUse.document.citations.length }, 'ValidateCitations')
       
       jobId = await createValidationJob(checkIdToUse, jsonDataToUse)
       
@@ -256,21 +241,19 @@ export async function POST(
         throw new Error("createValidationJob returned undefined jobId")
       }
       
-      console.log(`[validate-citations] Successfully created job: ${jobId}`)
+      logger.info(`Successfully created job`, { jobId }, 'ValidateCitations')
     } catch (error) {
-      console.error("[validate-citations] Error in createValidationJob:", error)
+      logger.error("Error in createValidationJob", error, 'ValidateCitations')
       if (error instanceof Error) {
-        console.error("[validate-citations] Error message:", error.message)
-        console.error("[validate-citations] Error stack:", error.stack)
         // Check if it's a unique constraint violation
         if (error.message.includes('Unique constraint') || error.message.includes('duplicate') || (error as any)?.code === 'P2002') {
           // Job might have been created between check and creation
-          console.log("[validate-citations] Checking for existing job after constraint error")
+          logger.debug("Checking for existing job after constraint error", undefined, 'ValidateCitations')
           const existingJobAfterError = await prisma.validationJob.findUnique({
             where: { checkId: id },
           })
           if (existingJobAfterError) {
-            console.log(`[validate-citations] Found existing job: ${existingJobAfterError.id}`)
+            logger.debug(`Found existing job`, { jobId: existingJobAfterError.id }, 'ValidateCitations')
             return NextResponse.json({
               jobId: existingJobAfterError.id,
               checkId: checkIdToUse,
@@ -285,48 +268,42 @@ export async function POST(
 
     // Trigger worker to start processing (call directly instead of fetch)
     try {
-      console.log(`[validate-citations] Starting worker processing directly`)
+      logger.debug(`Starting worker processing directly`, undefined, 'ValidateCitations')
       // Import worker function directly
       const { processQueueItems } = await import("@/lib/citation-identification/worker")
-      console.log(`[validate-citations] Worker function imported successfully`)
+      logger.debug(`Worker function imported successfully`, undefined, 'ValidateCitations')
       
       // Process first batch asynchronously (don't await to avoid blocking response)
       processQueueItems(5)
         .then((result) => {
-          console.log(`[validate-citations] Worker processed ${result.processed} items:`, result.itemIds)
+          logger.debug(`Worker processed items`, { processed: result.processed, itemIds: result.itemIds }, 'ValidateCitations')
           // Continue processing more items asynchronously if needed
           if (result.processed > 0) {
             const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
-            console.log(`[validate-citations] Triggering continuation batch`)
+            logger.debug(`Triggering continuation batch`, undefined, 'ValidateCitations')
             fetch(`${baseUrl}/api/citation-checker/worker/process-queue?maxItems=5`, {
               method: 'POST',
             })
               .then((res) => {
-                console.log(`[validate-citations] Continuation batch triggered: ${res.status}`)
+                logger.debug(`Continuation batch triggered`, { status: res.status }, 'ValidateCitations')
               })
               .catch((err) => {
-                console.error(`[validate-citations] Error triggering continuation:`, err)
+                logger.error(`Error triggering continuation`, err, 'ValidateCitations')
               })
           } else {
-            console.log(`[validate-citations] No items processed, not triggering continuation`)
+            logger.debug(`No items processed, not triggering continuation`, undefined, 'ValidateCitations')
           }
         })
         .catch((err) => {
-          console.error("[validate-citations] Error in worker processing:", err)
-          if (err instanceof Error) {
-            console.error("[validate-citations] Worker error details:", err.message, err.stack)
-          }
+          logger.error("Error in worker processing", err, 'ValidateCitations')
         })
-      console.log(`[validate-citations] Worker processing started (async)`)
+      logger.debug(`Worker processing started (async)`, undefined, 'ValidateCitations')
     } catch (workerError) {
       // Don't fail the request if worker trigger fails
-      console.error("[validate-citations] Error starting worker:", workerError)
-      if (workerError instanceof Error) {
-        console.error("[validate-citations] Worker start error details:", workerError.message, workerError.stack)
-      }
+      logger.error("Error starting worker", workerError, 'ValidateCitations')
     }
     
-    console.log(`[validate-citations] Returning success response with jobId: ${jobId}`)
+    logger.debug(`Returning success response`, { jobId }, 'ValidateCitations')
 
     return NextResponse.json({
       jobId,
@@ -335,34 +312,7 @@ export async function POST(
       message: 'Validation job created and processing started',
     })
   } catch (error) {
-    console.error("[validate-citations] Top-level error caught:", error)
-    if (error instanceof Error) {
-      console.error("[validate-citations] Error name:", error.name)
-      console.error("[validate-citations] Error message:", error.message)
-      console.error("[validate-citations] Error stack:", error.stack)
-      
-      // Check for Prisma errors
-      if ((error as any).code) {
-        console.error("[validate-citations] Prisma error code:", (error as any).code)
-      }
-      if ((error as any).meta) {
-        console.error("[validate-citations] Prisma error meta:", (error as any).meta)
-      }
-    } else {
-      console.error("[validate-citations] Non-Error object:", JSON.stringify(error, null, 2))
-    }
-    
-    return NextResponse.json(
-      { 
-        error: "Failed to create validation job",
-        details: error instanceof Error ? error.message : String(error),
-        ...(process.env.NODE_ENV === 'development' && error instanceof Error && {
-          stack: error.stack,
-          name: error.name,
-        })
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'ValidateCitations')
   }
 }
 
@@ -373,15 +323,10 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
@@ -404,11 +349,7 @@ export async function GET(
       message: "No validation job found. Use POST to create a validation job.",
     })
   } catch (error) {
-    console.error("Error in GET validation endpoint:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetValidationStatus')
   }
 }
 

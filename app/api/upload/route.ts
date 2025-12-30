@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadBlob } from '@/lib/blob';
+import { handleApiError } from '@/lib/api-helpers';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,11 +25,8 @@ export async function POST(request: NextRequest) {
       pathname: blob.pathname,
     });
   } catch (error) {
-    console.error('Upload error:', error);
-    return NextResponse.json(
-      { error: 'Failed to upload file' },
-      { status: 500 }
-    );
+    logger.error('Upload error', error, 'UploadRoute');
+    return handleApiError(error, 'UploadRoute');
   }
 }
 

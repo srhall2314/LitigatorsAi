@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { compareHeavyAnalysisRuns, HeavyAnalysisRun } from "@/lib/citation-identification/heavy-analysis"
 import { CitationDocument } from "@/types/citation-json"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(
   request: NextRequest,
@@ -11,11 +11,9 @@ export async function GET(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
 
     const { searchParams } = new URL(request.url)
     const runId = searchParams.get('runId') || searchParams.get('testRunId') // Support both for backward compatibility
@@ -125,14 +123,7 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error("Error comparing heavy analysis runs:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'CompareHeavyAnalysisRuns')
   }
 }
 

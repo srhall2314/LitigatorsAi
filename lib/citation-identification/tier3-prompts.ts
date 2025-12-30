@@ -556,17 +556,4 @@ REASONING: <2-3 sentences explaining your assessment from a judicial-review pers
 CASE_LINK: <URL to the case/authority if found, or "NOT_FOUND" if unavailable>`
 }
 
-/**
- * @deprecated Use getRigorousLegalInvestigatorPrompt, getHolisticLegalAnalystPrompt, or getPatternRecognitionExpertPrompt instead
- * Legacy function kept for backward compatibility
- */
-export function getTier3InvestigationPrompt(
-  citation: Citation,
-  context: string,
-  tier2Results: CitationValidation
-): string {
-  // Use Agent 1 (Senior Litigator Reviewer) as default for backward compatibility
-  // Note: tier2Results parameter kept for backward compatibility but not used in new format
-  return getRigorousLegalInvestigatorPrompt(citation, context)
-}
 

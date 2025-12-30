@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessCase } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const { searchParams } = new URL(request.url)
     const filter = searchParams.get("filter") || "all" // "all" | "owned" | "member"
@@ -84,29 +74,15 @@ export async function GET(request: NextRequest) {
       updatedAt: c.updatedAt.toISOString(),
     })))
   } catch (error) {
-    console.error("Error fetching cases:", error)
-    return NextResponse.json(
-      { error: "Failed to fetch cases" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetCases')
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const body = await request.json()
     const { name, description, status, metadata } = body
@@ -149,11 +125,7 @@ export async function POST(request: NextRequest) {
       updatedAt: case_.updatedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error creating case:", error)
-    return NextResponse.json(
-      { error: "Failed to create case" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'CreateCase')
   }
 }
 

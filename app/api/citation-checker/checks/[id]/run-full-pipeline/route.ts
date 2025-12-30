@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canModifyWorkflow } from "@/lib/access-control"
+import { requireAuth, handleApiError, getNextVersionNumber } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 /**
  * Unified endpoint that runs the complete citation checking pipeline:
@@ -18,19 +18,10 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get the current CitationCheck
     const currentCheck = await prisma.citationCheck.findUnique({
@@ -111,12 +102,7 @@ export async function POST(
 
     if (!hasCitations) {
       // Get latest version
-      const latestVersion = await prisma.citationCheck.findFirst({
-        where: { fileUploadId: currentCheck.fileUploadId },
-        orderBy: { version: "desc" },
-      })
-
-      const nextVersion = latestVersion ? latestVersion.version + 1 : 1
+      const nextVersion = await getNextVersionNumber(currentCheck.fileUploadId)
 
       // Create new version with identified citations
       const newVersion = await prisma.citationCheck.create({
@@ -188,14 +174,7 @@ export async function POST(
       message: "Pipeline started successfully",
     })
   } catch (error) {
-    console.error("Error running full pipeline:", error)
-    return NextResponse.json(
-      {
-        error: "Failed to run pipeline",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'RunFullPipeline')
   }
 }
 

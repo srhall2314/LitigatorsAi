@@ -94,23 +94,47 @@ export function RunCitationCheckerPage({ fileId, checkId: initialCheckId }: RunC
 
   const pollValidationProgress = async (jobId: string, checkIdToUse: string | null) => {
     try {
+      console.log(`[RunCitationCheckerPage] Polling job status for jobId: ${jobId}`)
       const response = await fetch(`/api/citation-checker/jobs/${jobId}`)
       if (response.ok) {
         const data = await response.json()
         
+        console.log('[RunCitationCheckerPage] Job progress update:', {
+          jobId: data.id,
+          status: data.status,
+          tier2Progress: data.tier2Progress,
+          tier3Progress: data.tier3Progress,
+          checkId: data.checkId
+        })
+        
+        // Extract progress from the correct structure
+        const tier2Current = data.tier2Progress?.current || data.tier2Completed || 0
+        const tier2Total = data.tier2Progress?.total || data.tier2Total || 0
+        const tier3Current = data.tier3Progress?.current || data.tier3Completed || 0
+        const tier3Total = data.tier3Progress?.total || data.tier3Total || 0
+        
+        // Determine stage
+        let stage: 'idle' | 'tier2' | 'tier3' | 'complete' = 'tier2'
+        if (data.status === 'completed') {
+          stage = 'complete'
+        } else if (tier2Current >= tier2Total && tier3Total > 0) {
+          stage = 'tier3'
+        } else if (tier2Current < tier2Total) {
+          stage = 'tier2'
+        }
+        
         setProgress(prev => ({
           ...prev,
           validationProgress: {
-            tier2Current: data.tier2Completed || 0,
-            tier2Total: data.tier2Total || 0,
-            tier3Current: data.tier3Completed || 0,
-            tier3Total: data.tier3Total || 0,
-            stage: data.status === 'completed' ? 'complete' : 
-                   data.tier3Total > 0 && data.tier3Completed < data.tier3Total ? 'tier3' : 'tier2'
+            tier2Current: tier2Current,
+            tier2Total: tier2Total,
+            tier3Current: tier3Current,
+            tier3Total: tier3Total,
+            stage: stage
           },
           message: data.status === 'completed' 
             ? 'Validation complete!' 
-            : `Validating citations... (Tier 2: ${data.tier2Completed || 0}/${data.tier2Total || 0}, Tier 3: ${data.tier3Completed || 0}/${data.tier3Total || 0})`
+            : `Validating citations... (Tier 2: ${tier2Current}/${tier2Total}, Tier 3: ${tier3Current}/${tier3Total})`
         }))
         
         if (data.status === 'completed') {

@@ -15,7 +15,6 @@ import {
 } from './validation-prompts'
 import { parseAgentResponse, ParsedVerdict } from './response-parser'
 import { 
-  getTier3InvestigationPrompt, 
   parseTier3Response, 
   parseTier3AgentResponse,
   getRigorousLegalInvestigatorPrompt,
@@ -24,6 +23,7 @@ import {
 } from './tier3-prompts'
 import { extractDocumentContext } from './context-extractor'
 import { extractTokens, calculateCost, calculateRunCost } from './token-tracking'
+import { logger } from '@/lib/logger'
 
 // Agent configurations
 const AGENT_CONFIGS = [
@@ -160,9 +160,10 @@ async function callValidationAgent(
       {
         ...RETRY_CONFIG,
         onRetry: (error: Error, attempt: number) => {
-          console.warn(
-            `[Validation] Retrying agent ${agentConfig.name} (attempt ${attempt}/${RETRY_CONFIG.retries + 1}):`,
-            error instanceof Error ? error.message : String(error)
+          logger.warn(
+            `Retrying agent ${agentConfig.name}`,
+            error,
+            'Validation'
           )
         },
       }
@@ -218,7 +219,7 @@ async function callValidationAgent(
     
     return verdict
   } catch (error) {
-    console.error(`[Validation] Error calling agent ${agentConfig.name} after retries:`, error)
+    logger.error(`Error calling agent ${agentConfig.name} after retries`, error, 'Validation')
     
     // Return default score of 5 (middle) on error after retries exhausted
     return {
@@ -454,9 +455,10 @@ async function callTier3Agent(
       {
         ...RETRY_CONFIG,
         onRetry: (error: Error, attempt: number) => {
-          console.warn(
-            `[Tier3] Retrying agent ${agentName} (attempt ${attempt}/${RETRY_CONFIG.retries + 1}):`,
-            error instanceof Error ? error.message : String(error)
+          logger.warn(
+            `Retrying agent ${agentName}`,
+            error,
+            'Tier3'
           )
         },
       }
@@ -515,7 +517,7 @@ async function callTier3Agent(
     
     return verdict
   } catch (error) {
-    console.error(`[Tier3] Error calling agent ${agentName} after retries:`, error)
+    logger.error(`Error calling agent ${agentName} after retries`, error, 'Tier3')
     
     // Return default MODERATE_RISK on error after retries exhausted
     return {
@@ -770,11 +772,7 @@ export async function validateCitationTier3(
     
     return result
   } catch (error) {
-    console.error(`[Tier3] Error investigating citation ${citation.id} after retries:`, error)
-    if (error instanceof Error) {
-      console.error(`[Tier3] Error message: ${error.message}`)
-      console.error(`[Tier3] Error stack: ${error.stack}`)
-    }
+    logger.error(`Error investigating citation ${citation.id} after retries`, error, 'Tier3')
     
     // Return fail result on error after retries exhausted
     // Create error panel evaluation

@@ -3,6 +3,7 @@ import { validateCitationWithPanel, validateCitationTier3 } from "@/lib/citation
 import { extractDocumentContext } from "@/lib/citation-identification/context-extractor"
 import { ANTHROPIC_API_KEY } from "@/lib/env"
 import { prisma } from "@/lib/prisma"
+import { logger } from "@/lib/logger"
 
 /**
  * Process queue items directly (can be called from API routes or worker endpoint)
@@ -12,26 +13,26 @@ export async function processQueueItems(maxItems: number = 5): Promise<{ process
     throw new Error("Anthropic API key not configured")
   }
 
-  console.log(`[worker] Processing up to ${maxItems} items`)
+  logger.debug(`Processing up to ${maxItems} items`, { maxItems }, 'Worker')
   const processed: string[] = []
 
   for (let i = 0; i < maxItems; i++) {
-    console.log(`[worker] Getting next queue item (iteration ${i + 1}/${maxItems})`)
+    logger.debug(`Getting next queue item`, { iteration: i + 1, maxItems }, 'Worker')
     const queueItem = await getNextQueueItem()
 
     if (!queueItem) {
-      console.log('[worker] No more queue items to process')
+      logger.debug('No more queue items to process', undefined, 'Worker')
       break // No more items to process
     }
 
-    console.log(`[worker] Found queue item: ${queueItem.id} (job: ${queueItem.jobId}, citation: ${queueItem.citationId}, tier: ${queueItem.tier})`)
+    logger.debug(`Found queue item`, { itemId: queueItem.id, jobId: queueItem.jobId, citationId: queueItem.citationId, tier: queueItem.tier }, 'Worker')
 
     try {
-      console.log(`[worker] Marking queue item ${queueItem.id} as processing`)
+      logger.debug(`Marking queue item as processing`, { itemId: queueItem.id }, 'Worker')
       await markQueueItemProcessing(queueItem.id)
 
       const check = queueItem.job.check
-      console.log(`[worker] Processing citation ${queueItem.citationId} from check ${check.id}`)
+      logger.debug(`Processing citation from check`, { citationId: queueItem.citationId, checkId: check.id }, 'Worker')
 
       if (!check.jsonData) {
         throw new Error(`CitationCheck ${check.id} has no jsonData`)
@@ -67,24 +68,24 @@ export async function processQueueItems(maxItems: number = 5): Promise<{ process
 
       if (queueItem.tier === 'tier2') {
         // Process Tier 2 validation
-        console.log(`[worker] Starting Tier 2 validation for citation ${queueItem.citationId}`)
+        logger.debug(`Starting Tier 2 validation for citation`, { citationId: queueItem.citationId }, 'Worker')
         const validation = await validateCitationWithPanel(
           citation,
           context,
           ANTHROPIC_API_KEY
         )
 
-        console.log(`[worker] Tier 2 validation complete. Needs Tier 3: ${validation.consensus.tier_3_trigger}`)
+        logger.debug(`Tier 2 validation complete`, { citationId: queueItem.citationId, needsTier3: validation.consensus.tier_3_trigger }, 'Worker')
         const needsTier3 = validation.consensus.tier_3_trigger
         
         // markQueueItemCompleted now throws on failure, so we catch it here
         try {
           await markQueueItemCompleted(queueItem.id, validation, needsTier3)
-          console.log(`[worker] Queue item ${queueItem.id} marked as completed and verified`)
+          logger.debug(`Queue item marked as completed and verified`, { itemId: queueItem.id }, 'Worker')
           processed.push(queueItem.id)
         } catch (error) {
           // markQueueItemCompleted already marked it as failed, just log and continue
-          console.error(`[worker] Failed to complete queue item ${queueItem.id}:`, error)
+          logger.error(`Failed to complete queue item ${queueItem.id}`, error, 'Worker')
           // Don't add to processed list - it will be retried
           throw error // Re-throw to trigger outer catch block
         }
@@ -114,29 +115,26 @@ export async function processQueueItems(maxItems: number = 5): Promise<{ process
         // markQueueItemCompleted now throws on failure, so we catch it here
         try {
           await markQueueItemCompleted(queueItem.id, tier3Result, false)
-          console.log(`[worker] Queue item ${queueItem.id} marked as completed and verified`)
+          logger.debug(`Queue item marked as completed and verified`, { itemId: queueItem.id }, 'Worker')
           processed.push(queueItem.id)
         } catch (error) {
           // markQueueItemCompleted already marked it as failed, just log and continue
-          console.error(`[worker] Failed to complete queue item ${queueItem.id}:`, error)
+          logger.error(`Failed to complete queue item ${queueItem.id}`, error, 'Worker')
           // Don't add to processed list - it will be retried
           throw error // Re-throw to trigger outer catch block
         }
       }
 
-      console.log(`[worker] Processed item ${queueItem.id} (${processed.length}/${maxItems} in this batch)`)
+      logger.debug(`Processed item`, { itemId: queueItem.id, processedCount: processed.length, maxItems }, 'Worker')
 
       // Check if job is complete
       const isComplete = await checkJobCompletion(queueItem.jobId)
       if (isComplete) {
-        console.log(`[worker] Job ${queueItem.jobId} is now complete`)
+        logger.debug(`Job is now complete`, { jobId: queueItem.jobId }, 'Worker')
       }
 
     } catch (error) {
-      console.error(`[worker] Error processing queue item ${queueItem.id}:`, error)
-      if (error instanceof Error) {
-        console.error(`[worker] Error details:`, error.message, error.stack)
-      }
+      logger.error(`Error processing queue item ${queueItem.id}`, error, 'Worker')
       await markQueueItemFailed(
         queueItem.id,
         error instanceof Error ? error.message : String(error)
@@ -144,7 +142,7 @@ export async function processQueueItems(maxItems: number = 5): Promise<{ process
     }
   }
 
-  console.log(`[worker] Worker completed. Processed ${processed.length} items:`, processed)
+  logger.debug(`Worker completed`, { processedCount: processed.length, itemIds: processed }, 'Worker')
   
   // Check if there are more pending items to process
   const remainingPending = await prisma.validationQueueItem.count({
@@ -153,7 +151,7 @@ export async function processQueueItems(maxItems: number = 5): Promise<{ process
     },
   })
   
-  console.log(`[worker] Remaining pending items: ${remainingPending}`)
+  logger.debug(`Remaining pending items`, { remainingPending }, 'Worker')
   
   return {
     processed: processed.length,

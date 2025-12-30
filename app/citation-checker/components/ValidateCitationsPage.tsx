@@ -184,9 +184,12 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
   }
 
   const startPolling = (jobId: string, newCheckId?: string) => {
+    console.log(`[ValidateCitationsPage] Starting polling for jobId: ${jobId}, newCheckId: ${newCheckId}`)
+    
     // Clear any existing polling interval
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
     }
     
     // If a new checkId was provided, update it
@@ -197,18 +200,22 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
     
     const poll = async () => {
       try {
+        console.log(`[ValidateCitationsPage] Polling job status for jobId: ${jobId}`)
         const response = await fetch(`/api/citation-checker/jobs/${jobId}`)
         
         if (!response.ok) {
+          console.error(`[ValidateCitationsPage] Polling failed: ${response.status} ${response.statusText}`)
           throw new Error(`Failed to fetch job status: ${response.statusText}`)
         }
         
         const job = await response.json()
         
         console.log('[ValidateCitationsPage] Job progress update:', {
+          jobId: job.id,
+          status: job.status,
           tier2: job.tier2Progress,
           tier3: job.tier3Progress,
-          status: job.status
+          checkId: job.checkId
         })
         
         // Determine stage based on progress
@@ -226,7 +233,7 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
           stage = 'tier3'
         }
         
-        setProgress({
+        const newProgress = {
           tier2Current: job.tier2Progress?.current || 0,
           tier2Total: job.tier2Progress?.total || 0,
           tier3Current: job.tier3Progress?.current || 0,
@@ -241,7 +248,10 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
           tier3Completed: job.tier3Progress?.completed,
           tier3Failed: job.tier3Progress?.failed,
           jobStatus: job.status,
-        })
+        }
+        
+        console.log('[ValidateCitationsPage] Setting progress state:', newProgress)
+        setProgress(newProgress)
         
         if (job.status === 'completed') {
           if (pollIntervalRef.current) {
@@ -367,6 +377,10 @@ export function ValidateCitationsPage({ fileId }: ValidateCitationsPageProps) {
           <h3 className="text-sm font-semibold text-gray-900 mb-3">
             Validation Progress {progress.jobStatus && `(${progress.jobStatus})`}
           </h3>
+          {/* Debug info - remove after testing */}
+          <div className="mb-2 text-xs text-gray-500 font-mono">
+            Debug: T2={progress.tier2Current}/{progress.tier2Total} T3={progress.tier3Current}/{progress.tier3Total} Stage={progress.stage}
+          </div>
           
           {/* Tier 2 Progress */}
           <div className="mb-4">

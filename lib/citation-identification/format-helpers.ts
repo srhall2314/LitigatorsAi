@@ -98,25 +98,6 @@ export function getCitationRiskLevel(citation: CitationWithValidation): Tier3Ris
   return 'MODERATE_RISK'
 }
 
-/**
- * Legacy function for backward compatibility - maps risk levels to old status categories.
- * Use getCitationRiskLevel() for new code.
- * 
- * @deprecated Use getCitationRiskLevel() instead
- */
-export function getValidationStatus(citation: CitationWithValidation): 'valid' | 'uncertain' | 'invalid' | null {
-  const riskLevel = getCitationRiskLevel(citation)
-  if (!riskLevel) return null
-  
-  switch (riskLevel) {
-    case 'LOW_RISK':
-      return 'valid'
-    case 'MODERATE_RISK':
-      return 'uncertain'
-    case 'NEEDS_ADDITIONAL_REVIEW':
-      return 'invalid'
-  }
-}
 
 /**
  * Calculate risk-based statistics from an array of citations.
@@ -159,26 +140,6 @@ export function calculateRiskStatistics(citations: CitationWithValidation[]): {
   }
 }
 
-/**
- * Legacy function for backward compatibility - maps risk statistics to old status categories.
- * Use calculateRiskStatistics() for new code.
- * 
- * @deprecated Use calculateRiskStatistics() instead
- */
-export function calculateValidationStatistics(citations: CitationWithValidation[]): {
-  valid: number
-  uncertain: number
-  invalid: number
-  total: number
-} {
-  const riskStats = calculateRiskStatistics(citations)
-  return {
-    valid: riskStats.lowRisk,
-    uncertain: riskStats.moderateRisk,
-    invalid: riskStats.needsReview,
-    total: riskStats.total
-  }
-}
 
 /**
  * Check if an AgentVerdict uses the new format (numeric scoring)

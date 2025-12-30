@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { parseWordDocument, parseTextDocument } from "@/lib/document-parser"
 import { canModifyWorkflow } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -11,19 +11,10 @@ export async function POST(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     const fileUpload = await prisma.fileUpload.findUnique({
       where: { id: fileId },
@@ -94,24 +85,16 @@ export async function POST(
     // Download file from Vercel Blob Storage
     let fileBuffer: ArrayBuffer
     try {
-      console.log('[generate-json] Downloading file from:', fileUpload.blobUrl)
-      console.log('[generate-json] File details:', {
-        filename: fileUpload.originalName,
-        mimeType: fileUpload.mimeType,
-        fileSize: fileUpload.fileSize,
-      })
+      logger.debug('Downloading file', { blobUrl: fileUpload.blobUrl, filename: fileUpload.originalName, mimeType: fileUpload.mimeType, fileSize: fileUpload.fileSize }, 'GenerateJson')
       
       const fileResponse = await fetch(fileUpload.blobUrl)
       if (!fileResponse.ok) {
         throw new Error(`Failed to download file: ${fileResponse.statusText}`)
       }
       fileBuffer = await fileResponse.arrayBuffer()
-      console.log('[generate-json] File downloaded successfully, buffer size:', fileBuffer.byteLength)
+      logger.debug('File downloaded successfully', { bufferSize: fileBuffer.byteLength }, 'GenerateJson')
     } catch (error) {
-      console.error("[generate-json] Error downloading file:", error)
-      if (error instanceof Error) {
-        console.error("[generate-json] Download error details:", error.message, error.stack)
-      }
+      logger.error("Error downloading file", error, 'GenerateJson')
       return NextResponse.json(
         { 
           error: "Failed to download file from storage",
@@ -124,13 +107,13 @@ export async function POST(
     // Parse document to JSON structure (Word or text)
     let jsonData: any
     try {
-      console.log('[generate-json] Starting document parse...')
+      logger.debug('Starting document parse', undefined, 'GenerateJson')
       
       // Check if this is a text file
       if (fileUpload.mimeType === 'text/plain') {
         // Parse as plain text
         const text = new TextDecoder('utf-8').decode(fileBuffer)
-        console.log('[generate-json] Parsing as text document, text length:', text.length)
+        logger.debug('Parsing as text document', { textLength: text.length }, 'GenerateJson')
         jsonData = await parseTextDocument(
           text,
           fileUpload.originalName,
@@ -145,9 +128,9 @@ export async function POST(
         )
       }
       
-      console.log('[generate-json] Document parsed successfully, content blocks:', jsonData?.document?.content?.length || 0)
+      logger.debug('Document parsed successfully', { contentBlocks: jsonData?.document?.content?.length || 0 }, 'GenerateJson')
     } catch (error) {
-      console.error("Error parsing document:", error)
+      logger.error("Error parsing document", error, 'GenerateJson')
       return NextResponse.json(
         { 
           error: "Failed to parse document",
@@ -171,23 +154,13 @@ export async function POST(
       const { syncWorkflowFields } = await import("@/lib/workflow/workflow-utils")
       await syncWorkflowFields(prisma, citationCheck.id)
     } catch (syncError) {
-      console.warn("[generate-json] Failed to sync workflow fields:", syncError)
+      logger.warn("Failed to sync workflow fields", syncError, 'GenerateJson')
       // Don't fail the request if sync fails
     }
 
     return NextResponse.json(updated)
   } catch (error) {
-    console.error("Error generating JSON:", error)
-    if (error instanceof Error) {
-      console.error("Error details:", error.message, error.stack)
-    }
-    return NextResponse.json(
-      { 
-        error: "Failed to generate JSON",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GenerateJson')
   }
 }
 

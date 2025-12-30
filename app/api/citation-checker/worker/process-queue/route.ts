@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { processQueueItems } from "@/lib/citation-identification/worker"
+import { handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export const maxDuration = 300 // 5 minutes for Vercel Pro
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('[worker] Worker endpoint called')
+    logger.debug('Worker endpoint called', undefined, 'Worker')
     
     // Process up to N items per call (configurable)
     const maxItems = parseInt(request.nextUrl.searchParams.get('maxItems') || '5')
@@ -19,18 +21,18 @@ export async function POST(request: NextRequest) {
     const maxBatches = 20 // Safety limit to prevent infinite loops
     
     while (result.hasMore && batchCount < maxBatches && totalProcessed > 0) {
-      console.log(`[worker] Continuing to batch ${batchCount + 1}, processing more items...`)
+      logger.debug(`Continuing to batch ${batchCount + 1}`, undefined, 'Worker')
       const nextResult = await processQueueItems(maxItems)
       totalProcessed += nextResult.processed
       batchCount++
       
       if (nextResult.processed === 0 || !nextResult.hasMore) {
-        console.log(`[worker] No more items to process or batch returned 0 items`)
+        logger.debug(`No more items to process or batch returned 0 items`, undefined, 'Worker')
         break
       }
     }
     
-    console.log(`[worker] Completed ${batchCount} batches, total processed: ${totalProcessed}`)
+    logger.info(`Completed batches`, { batches: batchCount, totalProcessed }, 'Worker')
     
     return NextResponse.json({
       ...result,
@@ -39,14 +41,7 @@ export async function POST(request: NextRequest) {
     })
     
   } catch (error) {
-    console.error("[worker] Error in worker endpoint:", error)
-    return NextResponse.json(
-      {
-        error: "Worker error",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'Worker')
   }
 }
 

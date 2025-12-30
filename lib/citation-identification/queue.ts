@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma"
 import { CitationDocument } from "@/types/citation-json"
+import { logger } from "@/lib/logger"
 
 /**
  * Create a validation job and queue items for all citations
@@ -115,7 +116,7 @@ export async function resetStuckProcessingItems(): Promise<number> {
   })
   
   if (result.count > 0) {
-    console.log(`[resetStuckProcessingItems] Reset ${result.count} stuck processing items`)
+    logger.debug(`Reset ${result.count} stuck processing items`, { count: result.count }, 'Queue')
   }
   
   return result.count
@@ -174,7 +175,7 @@ export async function markQueueItemCompleted(
   })
   
   if (!item) {
-    console.error(`[markQueueItemCompleted] Queue item ${itemId} not found`)
+    logger.error(`Queue item ${itemId} not found`, undefined, 'Queue')
     return
   }
   
@@ -234,7 +235,7 @@ export async function markQueueItemCompleted(
     
     if (!updateSucceeded) {
       // Citation update failed - mark queue item as failed for retry
-      console.error(`[markQueueItemCompleted] Failed to update citation ${item.citationId}, marking queue item as failed`)
+      logger.error(`Failed to update citation ${item.citationId}, marking queue item as failed`, undefined, 'Queue')
       await markQueueItemFailed(
         itemId,
         `Failed to update citation in jsonData: citation update returned false`
@@ -251,7 +252,7 @@ export async function markQueueItemCompleted(
     
     if (!verificationSucceeded) {
       // Verification failed - mark queue item as failed for retry
-      console.error(`[markQueueItemCompleted] Verification failed for citation ${item.citationId}, marking queue item as failed`)
+      logger.error(`Verification failed for citation ${item.citationId}, marking queue item as failed`, undefined, 'Queue')
       await markQueueItemFailed(
         itemId,
         `Verification failed: citation does not have ${item.tier} validation after update`
@@ -259,10 +260,10 @@ export async function markQueueItemCompleted(
       throw new Error(`Verification failed for citation ${item.citationId}`)
     }
     
-    console.log(`[markQueueItemCompleted] Successfully completed queue item ${itemId} for citation ${item.citationId}`)
+    logger.debug(`Successfully completed queue item ${itemId} for citation ${item.citationId}`, { itemId, citationId: item.citationId }, 'Queue')
   } catch (error) {
     // If any step fails, mark as failed for retry
-    console.error(`[markQueueItemCompleted] Error completing queue item ${itemId}:`, error)
+    logger.error(`Error completing queue item ${itemId}`, error, 'Queue')
     await markQueueItemFailed(
       itemId,
       error instanceof Error ? error.message : String(error)
@@ -328,7 +329,7 @@ async function updateCitationInCheck(
       })
       
       if (!check?.jsonData) {
-        console.error(`[updateCitationInCheck] Check ${checkId} has no jsonData`)
+        logger.error(`Check ${checkId} has no jsonData`, undefined, 'Queue')
         return false
       }
       
@@ -339,7 +340,7 @@ async function updateCitationInCheck(
       const citationIndex = citations.findIndex((c: any) => c.id === citationId)
       
       if (citationIndex === -1) {
-        console.error(`[updateCitationInCheck] Citation ${citationId} not found in check ${checkId}`)
+        logger.error(`Citation ${citationId} not found in check ${checkId}`, { citationId, checkId }, 'Queue')
         return false
       }
       
@@ -347,11 +348,11 @@ async function updateCitationInCheck(
       
       // Idempotency check: if citation already has validation for this tier, skip update
       if (tier === 'tier2' && citation.validation) {
-        console.warn(`[updateCitationInCheck] Citation ${citationId} already has validation, skipping update`)
+        logger.warn(`Citation ${citationId} already has validation, skipping update`, { citationId, tier }, 'Queue')
         return true // Consider it successful since validation already exists
       }
       if (tier === 'tier3' && citation.tier_3) {
-        console.warn(`[updateCitationInCheck] Citation ${citationId} already has tier_3, skipping update`)
+        logger.warn(`Citation ${citationId} already has tier_3, skipping update`, { citationId, tier }, 'Queue')
         return true // Consider it successful since tier_3 already exists
       }
       
@@ -374,11 +375,11 @@ async function updateCitationInCheck(
         },
       })
       
-      console.log(`[updateCitationInCheck] Successfully updated citation ${citationId} (tier: ${tier}) in check ${checkId}`)
+      logger.debug(`Successfully updated citation ${citationId}`, { citationId, tier, checkId }, 'Queue')
       return true
     })
   } catch (error) {
-    console.error(`[updateCitationInCheck] Error updating citation ${citationId} in check ${checkId}:`, error)
+    logger.error(`Error updating citation ${citationId} in check ${checkId}`, error, 'Queue')
     return false
   }
 }
@@ -412,7 +413,7 @@ async function verifyCitationUpdate(
     
     return false
   } catch (error) {
-    console.error(`[verifyCitationUpdate] Error verifying citation ${citationId}:`, error)
+    logger.error(`Error verifying citation ${citationId}`, error, 'Queue')
     return false
   }
 }
@@ -474,7 +475,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
             },
           })
           retryCount++
-          console.log(`[retry] Creating Tier 3 queue item for citation ${citationId}`)
+          logger.debug(`Creating Tier 3 queue item for citation ${citationId}`, { citationId }, 'Queue')
           continue
         }
         
@@ -489,7 +490,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
             },
           })
           retryCount++
-          console.log(`[retry] Retrying Tier 3 for citation ${citationId} (attempt ${tier3Item.retryCount + 1}/3)`)
+          logger.debug(`Retrying Tier 3 for citation ${citationId}`, { citationId, attempt: tier3Item.retryCount + 1 }, 'Queue')
           continue
         }
         
@@ -506,7 +507,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
               },
             })
             retryCount++
-            console.log(`[retry] Resetting stuck Tier 3 item for citation ${citationId}`)
+            logger.debug(`Resetting stuck Tier 3 item for citation ${citationId}`, { citationId }, 'Queue')
             continue
           }
         }
@@ -523,7 +524,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
             },
           })
           retryCount++
-          console.log(`[retry] Retrying Tier 3 for citation ${citationId} - missing result`)
+          logger.debug(`Retrying Tier 3 for citation ${citationId} - missing result`, { citationId }, 'Queue')
           continue
         }
       }
@@ -533,7 +534,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
     
     // CRITICAL: If queue item is "completed" but citation has no validation, retry it
     if (!hasTier2Validation && tier2Item?.status === 'completed') {
-      console.warn(`[retry] Found completed queue item for citation ${citationId} but citation has no validation - resetting for retry`)
+      logger.warn(`Found completed queue item for citation ${citationId} but citation has no validation - resetting for retry`, { citationId }, 'Queue')
       await prisma.validationQueueItem.update({
         where: { id: tier2Item.id },
         data: {
@@ -558,7 +559,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
         },
       })
       retryCount++
-      console.log(`[retry] Retrying failed citation ${citationId} (attempt ${tier2Item.retryCount + 1}/3)`)
+      logger.debug(`Retrying failed citation ${citationId}`, { citationId, attempt: tier2Item.retryCount + 1 }, 'Queue')
       continue
     }
     
@@ -566,7 +567,7 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
     if (tier2Item?.status === 'processing') {
       const processingTime = Date.now() - tier2Item.updatedAt.getTime()
       if (processingTime > PROCESSING_TIMEOUT_MS) {
-        console.warn(`[retry] Found stuck processing item for citation ${citationId} - resetting`)
+        logger.warn(`Found stuck processing item for citation ${citationId} - resetting`, { citationId, processingTime }, 'Queue')
         await prisma.validationQueueItem.update({
           where: { id: tier2Item.id },
           data: {
@@ -593,12 +594,12 @@ export async function retryUnvalidatedCitations(jobId: string): Promise<number> 
         },
       })
       retryCount++
-      console.log(`[retry] Creating new queue item for unvalidated citation ${citationId}`)
+      logger.debug(`Creating new queue item for unvalidated citation ${citationId}`, { citationId }, 'Queue')
     }
   }
   
   if (retryCount > 0) {
-    console.log(`[retry] Retrying ${retryCount} unvalidated citations for job ${jobId}`)
+    logger.debug(`Retrying ${retryCount} unvalidated citations for job ${jobId}`, { retryCount, jobId }, 'Queue')
   }
   
   return retryCount
@@ -638,7 +639,7 @@ export async function checkJobCompletion(jobId: string): Promise<boolean> {
     
     if (retriedCount > 0) {
       // Job is not complete - citations are being retried
-      console.log(`[checkJobCompletion] Job ${jobId} has ${retriedCount} citations being retried`)
+      logger.debug(`Job ${jobId} has ${retriedCount} citations being retried`, { jobId, retriedCount }, 'Queue')
       return false
     }
     
@@ -658,7 +659,7 @@ export async function checkJobCompletion(jobId: string): Promise<boolean> {
       const totalUnvalidated = unvalidatedTier2 + unvalidatedTier3
       
       if (totalUnvalidated > 0) {
-        console.warn(`[checkJobCompletion] Job ${jobId} appears complete but ${totalUnvalidated} citations are missing validation (Tier 2: ${unvalidatedTier2}, Tier 3: ${unvalidatedTier3})`)
+        logger.warn(`Job ${jobId} appears complete but ${totalUnvalidated} citations are missing validation`, { jobId, totalUnvalidated, unvalidatedTier2, unvalidatedTier3 }, 'Queue')
         
         // DON'T mark as complete - return false to allow more retries
         // Only mark as complete if we've exhausted all retry attempts
@@ -698,7 +699,7 @@ export async function checkJobCompletion(jobId: string): Promise<boolean> {
       },
     })
     
-    console.log(`[checkJobCompletion] Job ${jobId} marked as completed`)
+    logger.debug(`Job ${jobId} marked as completed`, { jobId }, 'Queue')
     return true
   }
   

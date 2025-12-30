@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { generateDocument, ChatMessage } from "@/lib/ai/document-generation"
 import { ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY } from "@/lib/env"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 type Provider = "anthropic" | "openai" | "gemini" | "grok"
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
 
     const body = await request.json()
     const { 
@@ -107,14 +104,7 @@ export async function POST(request: NextRequest) {
       tokenUsage: result.tokenUsage,
     })
   } catch (error) {
-    console.error("Error in chat endpoint:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to generate response",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'ChatEndpoint')
   }
 }
 

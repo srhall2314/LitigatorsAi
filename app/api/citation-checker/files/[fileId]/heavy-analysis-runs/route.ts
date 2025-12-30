@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { Prisma } from "@prisma/client"
 import { runHeavyAnalysis, DEFAULT_MODELS } from "@/lib/citation-identification/heavy-analysis"
@@ -10,6 +8,9 @@ import { join } from "path"
 import { randomUUID } from "crypto"
 import { OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY, ANTHROPIC_API_KEY } from "@/lib/env"
 import { Provider } from "@/lib/citation-identification/token-tracking"
+import { requireAuth, handleApiError, getLatestCheck, getNextVersionNumber } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
+import { deepClone } from "@/lib/utils"
 
 export async function GET(
   request: NextRequest,
@@ -17,11 +18,9 @@ export async function GET(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
 
     // Get all checks for this file that are heavy analysis runs
     // Use workflowType field if available, fallback to checking jsonData
@@ -126,14 +125,7 @@ export async function GET(
 
     return NextResponse.json({ runs })
   } catch (error) {
-    console.error("Error fetching heavy analysis runs:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetHeavyAnalysisRuns')
   }
 }
 
@@ -143,19 +135,10 @@ export async function POST(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get request body
     const body = await request.json()
@@ -166,12 +149,12 @@ export async function POST(
     // Validate and fix deprecated Grok models
     if (provider === 'grok') {
       if (model === 'grok-beta' || !model.startsWith('grok-3')) {
-        console.warn(`[heavy-analysis-runs] Invalid or deprecated Grok model '${model}', defaulting to 'grok-3-fast'`)
+        logger.warn(`Invalid or deprecated Grok model, defaulting to grok-3-fast`, { model }, 'HeavyAnalysisRuns')
         model = 'grok-3-fast'
       }
     }
     
-    console.log(`[heavy-analysis-runs] Request: provider=${provider}, model=${model}, numberOfRuns=${numberOfRuns}`)
+    logger.info(`Request received`, { provider, model, numberOfRuns }, 'HeavyAnalysisRuns')
 
     if (!numberOfRuns || numberOfRuns < 1 || numberOfRuns > 10) {
       return NextResponse.json(
@@ -181,10 +164,7 @@ export async function POST(
     }
 
     // Get the latest CitationCheck with JSON (after T1)
-    const latestCheck = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: fileId },
-      orderBy: { version: "desc" },
-    })
+    const latestCheck = await getLatestCheck(fileId)
 
     if (!latestCheck || !latestCheck.jsonData) {
       return NextResponse.json(
@@ -218,7 +198,7 @@ export async function POST(
       const promptPath = join(process.cwd(), 'heavyprmpt.md')
       basePrompt = readFileSync(promptPath, 'utf-8')
     } catch (error) {
-      console.error('[heavy-analysis-runs] Failed to read prompt file:', error)
+      logger.error('Failed to read prompt file', error, 'HeavyAnalysisRuns')
       return NextResponse.json(
         { error: "Failed to load analysis prompt" },
         { status: 500 }
@@ -271,12 +251,12 @@ export async function POST(
     const latestVersion = latestCheck.version
     const checkIds: string[] = []
 
-    console.log(`[heavy-analysis-runs] Creating ${numberOfRuns} heavy analysis runs using ${provider}/${model}`)
+    logger.info(`Creating heavy analysis runs`, { numberOfRuns, provider, model }, 'HeavyAnalysisRuns')
 
     // Create N runs sequentially
     for (let i = 1; i <= numberOfRuns; i++) {
       // Deep copy the JSON data
-      const freshJsonData = JSON.parse(JSON.stringify(jsonData)) as CitationDocument
+      const freshJsonData = deepClone(jsonData)
       
       // Clear heavy_analysis results from previous runs
       if (freshJsonData.document?.citations) {
@@ -297,11 +277,11 @@ export async function POST(
       // Run heavy analysis
       let updatedJsonData: CitationDocument
       try {
-        console.log(`[heavy-analysis-runs] Starting run ${i}/${numberOfRuns} with provider=${provider}, model=${model}`)
+        logger.debug(`Starting run`, { runNumber: i, totalRuns: numberOfRuns, provider, model }, 'HeavyAnalysisRuns')
         updatedJsonData = await runHeavyAnalysis(freshJsonData, basePrompt, provider, model, apiKey)
-        console.log(`[heavy-analysis-runs] Run ${i}/${numberOfRuns} completed successfully`)
+        logger.debug(`Run completed successfully`, { runNumber: i, totalRuns: numberOfRuns }, 'HeavyAnalysisRuns')
       } catch (error) {
-        console.error(`[heavy-analysis-runs] Run ${i} failed:`, error)
+        logger.error(`Run failed`, error, 'HeavyAnalysisRuns')
         const errorMessage = error instanceof Error ? error.message : String(error)
         const errorDetails = error instanceof Error && error.stack ? error.stack : undefined
         
@@ -360,7 +340,7 @@ export async function POST(
         } catch (dbError: any) {
           retries--
           if (dbError?.code === 'P1001' || dbError?.message?.includes('Closed') || dbError?.message?.includes('connection')) {
-            console.warn(`[heavy-analysis-runs] Database connection error, retrying... (${retries} retries left)`)
+            logger.warn(`Database connection error, retrying`, { retriesLeft: retries }, 'HeavyAnalysisRuns')
             if (retries > 0) {
               // Wait a bit before retrying
               await new Promise(resolve => setTimeout(resolve, 1000))
@@ -368,7 +348,7 @@ export async function POST(
               try {
                 await prisma.$connect()
               } catch (connectError) {
-                console.error('[heavy-analysis-runs] Failed to reconnect:', connectError)
+                logger.error('Failed to reconnect', connectError, 'HeavyAnalysisRuns')
               }
               continue
             }
@@ -382,7 +362,7 @@ export async function POST(
       }
 
       checkIds.push(newCheck.id)
-      console.log(`[heavy-analysis-runs] Completed run ${i}/${numberOfRuns}`)
+      logger.debug(`Completed run`, { runNumber: i, totalRuns: numberOfRuns }, 'HeavyAnalysisRuns')
     }
 
     return NextResponse.json({
@@ -394,14 +374,7 @@ export async function POST(
       message: `Created ${numberOfRuns} heavy analysis run(s).`,
     })
   } catch (error) {
-    console.error("Error creating heavy analysis runs:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'HeavyAnalysisRuns')
   }
 }
 

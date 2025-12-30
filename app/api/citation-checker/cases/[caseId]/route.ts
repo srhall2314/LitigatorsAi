@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessCase } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(
   request: NextRequest,
@@ -10,19 +10,10 @@ export async function GET(
 ) {
   try {
     const { caseId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access
     const hasAccess = await canAccessCase(user.id, caseId, "view")
@@ -108,11 +99,7 @@ export async function GET(
       })),
     })
   } catch (error) {
-    console.error("Error fetching case:", error)
-    return NextResponse.json(
-      { error: "Failed to fetch case" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetCase')
   }
 }
 
@@ -122,19 +109,10 @@ export async function PATCH(
 ) {
   try {
     const { caseId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access - need edit permission
     const hasAccess = await canAccessCase(user.id, caseId, "edit")
@@ -191,11 +169,7 @@ export async function PATCH(
       updatedAt: case_.updatedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error updating case:", error)
-    return NextResponse.json(
-      { error: "Failed to update case" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'UpdateCase')
   }
 }
 
@@ -205,19 +179,10 @@ export async function DELETE(
 ) {
   try {
     const { caseId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access - need route permission (case owner)
     const hasAccess = await canAccessCase(user.id, caseId, "route")
@@ -251,11 +216,7 @@ export async function DELETE(
       message: "Case deleted successfully. Documents have been unassigned from the case.",
     })
   } catch (error) {
-    console.error("Error deleting case:", error)
-    return NextResponse.json(
-      { error: "Failed to delete case" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'DeleteCase')
   }
 }
 

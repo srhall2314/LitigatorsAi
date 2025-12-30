@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessFile } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -10,19 +10,10 @@ export async function POST(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check if user has route permission (owner or admin can share)
     const hasRoutePermission = await canAccessFile(user.id, fileId, 'route')
@@ -131,14 +122,7 @@ export async function POST(
 
     return NextResponse.json(share, { status: 201 })
   } catch (error) {
-    console.error("Error sharing document:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to share document",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'ShareDocument')
   }
 }
 
@@ -148,19 +132,10 @@ export async function GET(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check if user has view access
     const hasAccess = await canAccessFile(user.id, fileId, 'view')
@@ -199,14 +174,7 @@ export async function GET(
 
     return NextResponse.json(shares)
   } catch (error) {
-    console.error("Error fetching shares:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to fetch shares",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetShares')
   }
 }
 
@@ -216,19 +184,10 @@ export async function DELETE(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get shareId from query params
     const { searchParams } = new URL(request.url)
@@ -265,14 +224,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Error revoking share:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to revoke share",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'RevokeShare')
   }
 }
 

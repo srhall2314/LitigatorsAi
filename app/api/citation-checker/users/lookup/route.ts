@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
 
     const { searchParams } = new URL(request.url)
     const email = searchParams.get("email")
@@ -33,11 +30,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(user)
   } catch (error) {
-    console.error("Error looking up user:", error)
-    return NextResponse.json(
-      { error: "Failed to lookup user" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'LookupUser')
   }
 }
 

@@ -1,8 +1,15 @@
+/**
+ * POST/GET /api/citation-checker/files/[fileId]/route
+ * Handles document routing operations (route to another user, get routing history)
+ * 
+ * Note: This is in route/route.ts to handle the /route endpoint.
+ * For DELETE operations, see ../route.ts
+ */
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessFile } from "@/lib/access-control"
+import { requireAuth, handleApiError, getLatestCheck } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -10,19 +17,13 @@ export async function POST(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Use centralized auth helper
+    const authResult = await requireAuth(request)
+    if (authResult.error) {
+      return authResult.error
     }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const { user } = authResult
 
     // Check if user has route permission (owner or admin can route)
     const hasRoutePermission = await canAccessFile(user.id, fileId, 'route')
@@ -61,10 +62,7 @@ export async function POST(
     }
 
     // Get the latest CitationCheck for this file
-    const latestCheck = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: fileId },
-      orderBy: { version: "desc" },
-    })
+    const latestCheck = await getLatestCheck(fileId)
 
     if (!latestCheck) {
       return NextResponse.json(
@@ -172,20 +170,15 @@ export async function POST(
       },
     })
 
+    logger.info(`Document routed`, { fileId, fromUserId: user.id, toEmail: routeToEmail }, 'DocumentRoute')
+
     return NextResponse.json({
       check: updatedCheck,
       share,
       message: message || null,
     }, { status: 201 })
   } catch (error) {
-    console.error("Error routing document:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to route document",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'DocumentRoute')
   }
 }
 
@@ -195,19 +188,13 @@ export async function GET(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Use centralized auth helper
+    const authResult = await requireAuth(request)
+    if (authResult.error) {
+      return authResult.error
     }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const { user } = authResult
 
     // Check if user has view access
     const hasAccess = await canAccessFile(user.id, fileId, 'view')
@@ -249,14 +236,7 @@ export async function GET(
 
     return NextResponse.json(routingHistory)
   } catch (error) {
-    console.error("Error fetching routing history:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to fetch routing history",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'DocumentRouteHistory')
   }
 }
 

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessFile, canModifyWorkflow } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(
   request: NextRequest,
@@ -10,19 +10,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Use centralized auth helper
+    const authResult = await requireAuth(request)
+    if (authResult.error) {
+      return authResult.error
     }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const { user } = authResult
 
     const citationCheck = await prisma.citationCheck.findUnique({
       where: { id },
@@ -60,11 +54,7 @@ export async function GET(
 
     return NextResponse.json(citationCheck)
   } catch (error) {
-    console.error("Error fetching citation check:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetCitationCheck')
   }
 }
 
@@ -74,19 +64,13 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Use centralized auth helper
+    const authResult = await requireAuth(request)
+    if (authResult.error) {
+      return authResult.error
     }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const { user } = authResult
 
     const citationCheck = await prisma.citationCheck.findUnique({
       where: { id },
@@ -117,11 +101,7 @@ export async function PATCH(
 
     return NextResponse.json(updated)
   } catch (error) {
-    console.error("Error updating citation check:", error)
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'UpdateCitationCheck')
   }
 }
 

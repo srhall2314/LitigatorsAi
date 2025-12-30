@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { runHeavyAnalysis, getProviderFromModel, DEFAULT_MODELS } from "@/lib/citation-identification/heavy-analysis"
 import { CitationDocument } from "@/types/citation-json"
@@ -8,6 +6,8 @@ import { readFileSync } from "fs"
 import { join } from "path"
 import { OPENAI_API_KEY, GEMINI_API_KEY, GROK_API_KEY, ANTHROPIC_API_KEY } from "@/lib/env"
 import { Provider } from "@/lib/citation-identification/token-tracking"
+import { requireAuth, handleApiError, getLatestCheck } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -15,25 +15,13 @@ export async function POST(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get the latest CitationCheck with JSON (after T1)
-    const latestCheck = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: fileId },
-      orderBy: { version: "desc" },
-    })
+    const latestCheck = await getLatestCheck(fileId)
 
     if (!latestCheck || !latestCheck.jsonData) {
       return NextResponse.json(
@@ -72,7 +60,7 @@ export async function POST(
       const promptPath = join(process.cwd(), 'heavyprmpt.md')
       basePrompt = readFileSync(promptPath, 'utf-8')
     } catch (error) {
-      console.error('[heavy-analysis] Failed to read prompt file:', error)
+      logger.error('Failed to read prompt file', error, 'HeavyAnalysis')
       return NextResponse.json(
         { error: "Failed to load analysis prompt" },
         { status: 500 }
@@ -120,14 +108,14 @@ export async function POST(
       )
     }
 
-    console.log(`[heavy-analysis] Starting heavy analysis for ${citations.length} citations using ${provider}/${model}`)
+    logger.info(`Starting heavy analysis`, { citationsCount: citations.length, provider, model }, 'HeavyAnalysis')
 
     // Run heavy analysis
     let updatedJsonData: CitationDocument
     try {
       updatedJsonData = await runHeavyAnalysis(jsonData, basePrompt, provider, model, apiKey)
     } catch (error) {
-      console.error('[heavy-analysis] Analysis failed:', error)
+      logger.error('Analysis failed', error, 'HeavyAnalysis')
       return NextResponse.json(
         { 
           error: "Heavy analysis failed", 
@@ -169,14 +157,7 @@ export async function POST(
       message: "Heavy analysis completed successfully",
     })
   } catch (error) {
-    console.error("Error running heavy analysis:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'HeavyAnalysis')
   }
 }
 

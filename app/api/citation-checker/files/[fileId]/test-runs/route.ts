@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { Prisma } from "@prisma/client"
 import { createValidationJob, retryUnvalidatedCitations, checkJobCompletion } from "@/lib/citation-identification/queue"
 import { CitationDocument } from "@/types/citation-json"
 import { randomUUID } from "crypto"
+import { requireAuth, handleApiError, getLatestCheck } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
+import { deepClone } from "@/lib/utils"
 
 export async function GET(
   request: NextRequest,
@@ -13,19 +14,10 @@ export async function GET(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get all citation checks for this file that are test runs
     // Use workflowType field if available, fallback to checking jsonData
@@ -131,14 +123,7 @@ export async function GET(
 
     return NextResponse.json({ testRuns })
   } catch (error) {
-    console.error("Error fetching test runs:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetTestRuns')
   }
 }
 
@@ -148,19 +133,10 @@ export async function POST(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get request body
     const body = await request.json()
@@ -183,10 +159,7 @@ export async function POST(
     }
 
     // Get the latest CitationCheck with JSON
-    const latestCheck = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: fileId },
-      orderBy: { version: "desc" },
-    })
+    const latestCheck = await getLatestCheck(fileId)
 
     if (!latestCheck || !latestCheck.jsonData) {
       return NextResponse.json(
@@ -209,7 +182,7 @@ export async function POST(
     
     for (let i = 1; i <= numberOfRuns; i++) {
       // Deep copy the JSON data
-      const freshJsonData = JSON.parse(JSON.stringify(sourceJsonData)) as CitationDocument
+      const freshJsonData = deepClone(sourceJsonData)
       
       // Clear ALL validation results - start with clean Tier 1 citation data only
       if (freshJsonData.document?.citations) {
@@ -266,17 +239,17 @@ export async function POST(
       // Create validation job for this check (uses existing queue system)
       try {
         const jobId = await createValidationJob(newCheck.id, freshJsonData)
-        console.log(`[test-runs] Created validation job ${jobId} for check ${newCheck.id} (run ${i}/${numberOfRuns})`)
+        logger.debug(`Created validation job`, { jobId, checkId: newCheck.id, runNumber: i, totalRuns: numberOfRuns }, 'TestRuns')
         
         // Trigger worker to start processing (similar to validate-citations route)
         try {
           const { processQueueItems } = await import("@/lib/citation-identification/worker")
-          console.log(`[test-runs] Starting worker processing for run ${i}`)
+          logger.debug(`Starting worker processing`, { runNumber: i }, 'TestRuns')
           
           // Process first batch asynchronously (don't await to avoid blocking)
           processQueueItems(5)
             .then((result) => {
-              console.log(`[test-runs] Worker processed ${result.processed} items for run ${i}`)
+              logger.debug(`Worker processed items`, { processed: result.processed, runNumber: i }, 'TestRuns')
               // Continue processing more items asynchronously if needed
               if (result.processed > 0 && result.hasMore) {
                 const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
@@ -284,22 +257,22 @@ export async function POST(
                   method: 'POST',
                 })
                   .then((res) => {
-                    console.log(`[test-runs] Continuation batch triggered for run ${i}: ${res.status}`)
+                    logger.debug(`Continuation batch triggered`, { status: res.status, runNumber: i }, 'TestRuns')
                   })
                   .catch((err) => {
-                    console.error(`[test-runs] Error triggering continuation for run ${i}:`, err)
+                    logger.error(`Error triggering continuation`, err, 'TestRuns')
                   })
               }
             })
             .catch((err) => {
-              console.error(`[test-runs] Error in worker processing for run ${i}:`, err)
+              logger.error(`Error in worker processing`, err, 'TestRuns')
             })
         } catch (workerError) {
-          console.error(`[test-runs] Failed to trigger worker for run ${i}:`, workerError)
+          logger.error(`Failed to trigger worker`, workerError, 'TestRuns')
           // Don't fail the request if worker trigger fails - jobs are still queued
         }
       } catch (error) {
-        console.error(`[test-runs] Failed to create validation job for check ${newCheck.id}:`, error)
+        logger.error(`Failed to create validation job`, error, 'TestRuns')
         // Continue with other runs even if one fails
       }
     }
@@ -311,13 +284,6 @@ export async function POST(
       message: `Created ${numberOfRuns} test run(s). Validation jobs have been queued.`,
     })
   } catch (error) {
-    console.error("Error creating test run:", error)
-    return NextResponse.json(
-      { 
-        error: "Internal server error", 
-        details: error instanceof Error ? error.message : String(error) 
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'TestRuns')
   }
 }

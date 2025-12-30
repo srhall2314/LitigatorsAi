@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { canAccessCase } from "@/lib/access-control"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function PATCH(
   request: NextRequest,
@@ -10,19 +10,10 @@ export async function PATCH(
 ) {
   try {
     const { caseId, memberId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access - need edit permission to update member roles
     const hasAccess = await canAccessCase(user.id, caseId, "edit")
@@ -85,11 +76,7 @@ export async function PATCH(
       addedAt: updatedMember.addedAt.toISOString(),
     })
   } catch (error) {
-    console.error("Error updating case member:", error)
-    return NextResponse.json(
-      { error: "Failed to update case member" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'UpdateCaseMember')
   }
 }
 
@@ -99,19 +86,10 @@ export async function DELETE(
 ) {
   try {
     const { caseId, memberId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Check access - need edit permission to remove members
     const hasAccess = await canAccessCase(user.id, caseId, "edit")
@@ -138,11 +116,7 @@ export async function DELETE(
       message: "Member removed successfully",
     })
   } catch (error) {
-    console.error("Error removing case member:", error)
-    return NextResponse.json(
-      { error: "Failed to remove case member" },
-      { status: 500 }
-    )
+    return handleApiError(error, 'RemoveCaseMember')
   }
 }
 

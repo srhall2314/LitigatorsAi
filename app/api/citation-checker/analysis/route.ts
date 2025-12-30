@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { CitationDocument, Citation, CitationValidation, AnalysisStatistics, Tier3Verdict, Tier3FinalStatus, ValidationVerdict, AgreementLevel, Tier3RiskLevel } from "@/types/citation-json"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import { isNewFormatCitationValidation, isNewFormatTier3Result } from "@/lib/citation-identification/format-helpers"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
 
     // Query all CitationCheck records
     const citationChecks = await prisma.citationCheck.findMany({
@@ -471,7 +468,7 @@ export async function GET(request: NextRequest) {
           }
         }
       } catch (error) {
-        console.error(`Error processing citation check ${check.id}:`, error)
+        logger.error(`Error processing citation check`, error, 'AnalysisAPI')
         continue
       }
     }
@@ -520,10 +517,10 @@ export async function GET(request: NextRequest) {
     // Verify the math: distribution should sum to total citations
     const distributionSum = Object.values(validVoteDistributionInComplete).reduce((a, b) => a + b, 0)
     if (distributionSum !== citationsInCompleteDocuments) {
-      console.warn(`[Analysis API] Distribution sum (${distributionSum}) doesn't match total citations (${citationsInCompleteDocuments})`)
+      logger.warn(`Distribution sum doesn't match total citations`, { distributionSum, citationsInCompleteDocuments }, 'AnalysisAPI')
     }
     if (validVoteDistributionInComplete[5] !== tier2Unanimous5of5InCompleteDocuments) {
-      console.warn(`[Analysis API] Distribution 5/5 count (${validVoteDistributionInComplete[5]}) doesn't match tracked count (${tier2Unanimous5of5InCompleteDocuments})`)
+      logger.warn(`Distribution 5/5 count doesn't match tracked count`, { distributionCount: validVoteDistributionInComplete[5], trackedCount: tier2Unanimous5of5InCompleteDocuments }, 'AnalysisAPI')
     }
 
     const response = {
@@ -544,14 +541,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response)
   } catch (error) {
-    console.error("Error generating analysis statistics:", error)
-    return NextResponse.json(
-      { 
-        error: "Failed to generate analysis statistics",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'AnalysisAPI')
   }
 }
 

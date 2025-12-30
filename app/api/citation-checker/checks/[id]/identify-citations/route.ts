@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { identifyCitations } from "@/lib/citation-identification"
 import { canModifyWorkflow } from "@/lib/access-control"
+import { requireAuth, handleApiError, getNextVersionNumber } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function POST(
   request: NextRequest,
@@ -11,19 +11,10 @@ export async function POST(
 ) {
   try {
     const { id } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get the current CitationCheck (should be version 1 with json_generated status)
     const currentCheck = await prisma.citationCheck.findUnique({
@@ -48,12 +39,7 @@ export async function POST(
     }
 
     // Get the latest version for this fileUploadId to determine next version number
-    const latestVersion = await prisma.citationCheck.findFirst({
-      where: { fileUploadId: currentCheck.fileUploadId },
-      orderBy: { version: "desc" },
-    })
-
-    const nextVersion = latestVersion ? latestVersion.version + 1 : 1
+    const nextVersion = await getNextVersionNumber(currentCheck.fileUploadId)
 
     // Create new version (version 2) by copying jsonData from version 1
     // Inherit workflow fields from parent check
@@ -93,23 +79,13 @@ export async function POST(
       const { syncWorkflowFields } = await import("@/lib/workflow/workflow-utils")
       await syncWorkflowFields(prisma, newVersion.id)
     } catch (syncError) {
-      console.warn("[identify-citations] Failed to sync workflow fields:", syncError)
+      logger.warn("Failed to sync workflow fields", syncError, 'IdentifyCitations')
       // Don't fail the request if sync fails
     }
 
     return NextResponse.json(updated)
   } catch (error) {
-    console.error("Error identifying citations:", error)
-    if (error instanceof Error) {
-      console.error("Error details:", error.message, error.stack)
-    }
-    return NextResponse.json(
-      { 
-        error: "Failed to identify citations",
-        details: error instanceof Error ? error.message : String(error)
-      },
-      { status: 500 }
-    )
+    return handleApiError(error, 'IdentifyCitations')
   }
 }
 

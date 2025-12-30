@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { getTier3FinalStatus } from "@/lib/citation-identification/validation"
 import { getCitationRiskLevel } from "@/lib/citation-identification/format-helpers"
+import { requireAuth, handleApiError } from "@/lib/api-helpers"
+import { logger } from "@/lib/logger"
 
 export async function GET(
   request: NextRequest,
@@ -11,19 +11,10 @@ export async function GET(
 ) {
   try {
     const { fileId } = await params
-    const session = await getServerSession(authOptions)
     
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
+    const authResult = await requireAuth(request)
+    if (authResult.error) return authResult.error
+    const { user } = authResult
 
     // Get all citation checks for this file, ordered by version (newest first)
     const checks = await prisma.citationCheck.findMany({
@@ -126,11 +117,7 @@ export async function GET(
 
     return NextResponse.json({ runs })
   } catch (error) {
-    console.error("Error fetching validation runs:", error)
-    return NextResponse.json(
-      { error: "Internal server error", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    )
+    return handleApiError(error, 'GetValidationRuns')
   }
 }
 
