@@ -157,27 +157,53 @@ function extractCitationText(eyeciteCitation: any, text: string): string {
 
 /**
  * Convert Eyecite citation to CitationMatch format for validation
+ * Uses property-based detection to work in both dev (unminified) and production (minified) environments
  */
 function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: number, endIndex: number, citationText: string, logger: LogCollector): CitationMatch | null {
-  const citationType = eyeciteCitation.constructor.name
+  const constructorName = eyeciteCitation.constructor.name
+  const metadata = eyeciteCitation.metadata || {}
+  const groups = eyeciteCitation.groups || {}
   
-  logger.log(`Converting citation type: ${citationType}, extracted text: ${citationText}`)
+  logger.log(`Converting citation (constructor: ${constructorName}), extracted text: ${citationText}`)
   
-  // Map Eyecite citation types to our types
-  if (citationType === 'FullCaseCitation' || citationType === 'ShortCaseCitation') {
-    // Extract components from Eyecite citation
-    const metadata = eyeciteCitation.metadata || {}
-    const groups = eyeciteCitation.groups || {}
-    const volume = eyeciteCitation.volume?.toString() || groups.volume || ''
-    // Try multiple sources for reporter
-    const reporter = eyeciteCitation.reporter?.toString() || groups.reporter || metadata.reporter || ''
-    const page = eyeciteCitation.page?.toString() || groups.page || ''
+  // Property-based detection: Check if this looks like a statute/regulation citation
+  // Statutes/regulations have reporter in metadata/groups and section, but no volume/page
+  const reporter = eyeciteCitation.reporter?.toString() || groups.reporter || metadata.reporter || ''
+  const section = groups.section || metadata.section || ''
+  const title = groups.title || groups.chapter || metadata.title || ''
+  const volume = eyeciteCitation.volume?.toString() || groups.volume || ''
+  const page = eyeciteCitation.page?.toString() || groups.page || ''
+  
+  // Check if it's a statute or regulation (has reporter like U.S.C. or C.F.R. with section, but typically no volume/page)
+  if ((reporter === 'U.S.C.' || reporter === 'C.F.R.' || reporter === 'C.F.R') && section) {
+    const isRegulation = reporter === 'C.F.R.' || reporter === 'C.F.R'
+    
+    logger.log('Law citation components (property-based):', {
+      title, reporter, section, isRegulation
+    })
+    
+    return {
+      fullMatch: citationText,
+      startIndex,
+      endIndex,
+      type: isRegulation ? 'regulation' : 'statute',
+      components: {
+        volume: title, // Title for statutes, chapter for regulations
+        code: reporter,
+        section: section,
+      },
+    }
+  }
+  
+  // Property-based detection: Check if this looks like a case citation
+  // Case citations have volume, reporter, and page
+  if (volume && reporter && page) {
     const year = eyeciteCitation.year?.toString() || metadata.year || ''
     const court = metadata.court || ''
     const plaintiff = metadata.plaintiff || ''
     const defendant = metadata.defendant || ''
     
-    logger.log('Case citation components:', {
+    logger.log('Case citation components (property-based):', {
       volume, reporter, page, year, court, plaintiff, defendant,
       groupsReporter: groups.reporter,
       metadataReporter: metadata.reporter
@@ -200,37 +226,9 @@ function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: 
     }
   }
   
-  // For law citations (statutes/regulations)
-  if (citationType === 'FullLawCitation2') {
-    const groups = eyeciteCitation.groups || {}
-    const metadata = eyeciteCitation.metadata || {}
-    const title = groups.title || groups.chapter || metadata.title || ''
-    const reporter = groups.reporter || metadata.reporter || ''
-    const section = groups.section || metadata.section || ''
-    
-    // Determine if it's a statute (U.S.C.) or regulation (C.F.R.)
-    const isRegulation = reporter === 'C.F.R.' || reporter === 'C.F.R'
-    
-    logger.log('Law citation components:', {
-      title, reporter, section, isRegulation
-    })
-    
-    return {
-      fullMatch: citationText,
-      startIndex,
-      endIndex,
-      type: isRegulation ? 'regulation' : 'statute',
-      components: {
-        volume: title, // Title for statutes, chapter for regulations
-        code: reporter,
-        section: section,
-      },
-    }
-  }
-  
-  // For other types (Supra, Id, Unknown), filter them out - they're citation references, not standalone citations
-  // "Id." and "supra" are shorthand references to previously cited cases, not citations themselves
-  if (citationType === 'SupraCitation' || citationType === 'IdCitation') {
+  // Fallback: Try constructor name matching (for compatibility with dev/unminified builds)
+  // This handles SupraCitation and IdCitation which should be filtered out
+  if (constructorName === 'SupraCitation' || constructorName === 'IdCitation') {
     const normalizedText = citationText.trim().toLowerCase()
     // Filter out common citation references
     if (normalizedText === 'id.' || normalizedText === 'id' || normalizedText === 'supra' || normalizedText === 'infra') {
@@ -238,14 +236,18 @@ function eyeciteToCitationMatch(eyeciteCitation: any, text: string, startIndex: 
       return null
     }
     
-    // If it's a Supra/Id citation but has resolved content, we might want to keep it
-    // But for now, filter all Supra/Id citations as they're references, not citations
     logger.warn(`Filtering out Supra/Id citation reference: "${citationText}"`)
     return null
   }
   
+  // Filter out citations that are too short or incomplete (like just "§")
+  if (citationText.trim().length <= 2 && citationText.includes('§')) {
+    logger.warn(`Filtering out incomplete citation (too short): "${citationText}"`)
+    return null
+  }
+  
   // Unknown citations - log and return null
-  logger.warn(`Unknown citation type: ${citationType}, text: ${citationText}`)
+  logger.warn(`Unknown citation type (constructor: ${constructorName}), text: ${citationText}, properties: volume=${volume}, reporter=${reporter}, page=${page}, section=${section}`)
   return null
 }
 
